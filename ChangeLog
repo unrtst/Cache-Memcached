@@ -1,3 +1,15 @@
+2014-02-19: version 1.33
+    * Add enable_key_hashing/key_hash_method support.
+        If enabled, all memcached keys are hashed (ex. Digest::MD5::md5_base64)
+        before being sent to the memcached server, and mapped back to user supplied
+        values when needed (get_multi). IE. it's transparent to the user, and
+        enables the use of arbitrarily large keys with almost no performance penalty.
+
+    * Add tests and updated benchmarks for digest key hashing.
+        script/benchmark_method_overrides.pl
+        t/11_digest_keys_simple.t
+        t/12_digest_keys_more.t
+
 2014-02-19: version 1.32
 
     * Add many features currently found in Cache::Memcached::Fast:

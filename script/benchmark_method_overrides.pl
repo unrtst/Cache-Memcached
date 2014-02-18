@@ -91,6 +91,58 @@ my %instances = (
             sub { JSON::XS::decode_json($_[0]) },
         ],
     }),
+
+    ## ... same as above set, but with hashed keys enabled
+    'nocompress_HK' => Cache::Memcached->new({
+        servers => \@addrs,
+        select_timeout => 2,
+        compress_enable => 0,
+        enable_key_hashing => 1,
+    }),
+    'compress_HK'   => Cache::Memcached->new({
+        servers => \@addrs,
+        select_timeout => 2,
+        compress_enable => 1,
+        compress_threshold => 500, # bytes
+        enable_key_hashing => 1,
+    }),
+    'lz4_HK'        => Cache::Memcached->new({
+        servers => \@addrs,
+        select_timeout => 2,
+        compress_enable => 1,
+        compress_threshold => 500, # bytes
+        compress_methods => [
+            sub { ${$_[1]} = Compress::LZ4::compress( $_[0] )   },
+            sub { ${$_[1]} = Compress::LZ4::decompress( $_[0] ) },
+        ],
+        enable_key_hashing => 1,
+    }),
+    'jsonxs_HK'     => Cache::Memcached->new({
+        servers => \@addrs,
+        select_timeout => 2,
+        compress_enable => 0,
+        compress_threshold => 500, # bytes
+        serialize_methods => [
+            sub { JSON::XS::encode_json($_[0]) },
+            sub { JSON::XS::decode_json($_[0]) },
+        ],
+        enable_key_hashing => 1,
+    }),
+    'lz4jsonxs_HK'  => Cache::Memcached->new({
+        servers => \@addrs,
+        select_timeout => 2,
+        compress_enable => 1,
+        compress_threshold => 500, # bytes
+        compress_methods => [
+            sub { ${$_[1]} = Compress::LZ4::compress( $_[0] )   },
+            sub { ${$_[1]} = Compress::LZ4::decompress( $_[0] ) },
+        ],
+        serialize_methods => [
+            sub { JSON::XS::encode_json($_[0]) },
+            sub { JSON::XS::decode_json($_[0]) },
+        ],
+        enable_key_hashing => 1,
+    }),
 );
 # make sure compress_enable is set correctly (version <= 1.30 did not accept it to new())
 $instances{nocompress}->enable_compress(0);
@@ -98,6 +150,11 @@ $instances{compress}->enable_compress(1);
 $instances{jsonxs}->enable_compress(0);
 $instances{lz4}->enable_compress(1);
 $instances{lz4jsonxs}->enable_compress(1);
+$instances{nocompress_HK}->enable_compress(0);
+$instances{compress_HK}->enable_compress(1);
+$instances{jsonxs_HK}->enable_compress(0);
+$instances{lz4_HK}->enable_compress(1);
+$instances{lz4jsonxs_HK}->enable_compress(1);
 
 
 my %benchmarks;
