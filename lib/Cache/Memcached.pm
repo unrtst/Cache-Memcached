@@ -27,17 +27,23 @@ use fields qw{
     connect_timeout cb_connect_fail
     parser_class
     buck2sock buck2sock_generation
+    compress_ratio     max_size
+    compress_methods   serialize_methods
 };
 
 # flag definitions
 use constant F_STORABLE => 1;
 use constant F_COMPRESS => 2;
 
-# size savings required before saving compressed value
-use constant COMPRESS_SAVINGS => 0.20; # percent
+# size reduction required before saving compressed value
+use constant DEFAULT_COMPRESS_RATIO => 0.80; # percent
+# default max size of item values to store in memcached
+# NOTE: Cache::Memcached::Fast uses a default of 1024*1024 (1mb).
+#       Cache::Memcached disables this by default for backward compatibilty.
+use constant DEFAULT_MAX_SIZE => 0; # bytes
 
 use vars qw($VERSION $HAVE_ZLIB $FLAG_NOSIGNAL $HAVE_SOCKET6);
-$VERSION = "1.30";
+$VERSION = "1.32";
 
 BEGIN {
     $HAVE_ZLIB = eval "use Compress::Zlib (); 1;";
@@ -77,13 +83,31 @@ sub new {
     $self->{'stats'} = {};
     $self->{'pref_ip'} = $args->{'pref_ip'} || {};
     $self->{'compress_threshold'} = $args->{'compress_threshold'};
+    $self->{'compress_ratio'}     = $args->{'compress_ratio'} || DEFAULT_COMPRESS_RATIO;
     $self->{'compress_enable'}    = (exists $args->{'compress_enable'} && length $args->{'compress_enable'})
                                   ? $args->{'compress_enable'}
                                   : 1;
-
     $self->{'stat_callback'} = $args->{'stat_callback'} || undef;
     $self->{'readonly'} = $args->{'readonly'};
     $self->{'parser_class'} = $args->{'parser_class'} || $parser_class;
+    $self->{'max_size'}     = $args->{'max_size'} || DEFAULT_MAX_SIZE;
+
+    if (ref( $args->{'compress_methods'} ) eq 'ARRAY') {
+        $self->{'compress_methods'} = $args->{'compress_methods'};
+    } elsif ($HAVE_ZLIB) {
+        $self->{'compress_methods'} = [
+            sub { ${$_[1]} = Compress::Zlib::memGzip(${$_[0]})   },
+            sub { ${$_[1]} = Compress::Zlib::memGunzip(${$_[0]}) },
+        ];
+    } else {
+        $self->{'compress_methods'} = undef;
+    }
+
+    if (ref( $args->{'serialize_methods'} ) eq 'ARRAY') {
+        $self->{'serialize_methods'} = $args->{'serialize_methods'};
+    } else {
+        $self->{'serialize_methods'} = [ \&Storable::nfreeze, \&Storable::thaw ];
+    }
 
     # TODO: undocumented
     $self->{'connect_timeout'} = $args->{'connect_timeout'} || 0.25;
@@ -153,16 +177,54 @@ sub set_compress_threshold {
     $self->{'compress_threshold'} = $thresh;
 }
 
+sub set_compress_ratio {
+    my Cache::Memcached $self = shift;
+    my ($ratio) = @_;
+    $self->{'compress_ratio'} = $ratio;
+}
+
+sub set_max_size {
+    my Cache::Memcached $self = shift;
+    my ($size) = @_;
+    $self->{'max_size'} = $size;
+}
+
 sub enable_compress {
     my Cache::Memcached $self = shift;
     my ($enable) = @_;
     $self->{'compress_enable'} = $enable;
 }
 
-sub set_compress_eanble {
+sub set_compress_methods {
     my Cache::Memcached $self = shift;
-    my ($enable) = @_;
-    $self->{'compress_enable'} = $enable;
+    my $meth_array = $_[0];
+    $meth_array = [@_] unless ref $meth_array eq 'ARRAY';
+
+    if (@$meth_array != 2) {
+        warn "compress_methods() called with illegal number of arguments. Disabling.";
+        $self->{'compress_methods'} = undef
+    } elsif ( ! (ref $meth_array->[0] && ref $meth_array->[1]) ) {
+        warn "compress_methods() called with illegal arguments (not code references). Disabling.";
+        $self->{'compress_methods'} = undef
+    } else {
+        $self->{'compress_methods'} = $meth_array;
+    }
+}
+
+sub set_serialize_methods {
+    my Cache::Memcached $self = shift;
+    my $meth_array = $_[0];
+    $meth_array = [@_] unless ref $meth_array eq 'ARRAY';
+
+    if (@$meth_array != 2) {
+        warn "serialize_methods() called with illegal number of arguments. Disabling.";
+        $self->{'serialize_methods'} = undef
+    } elsif ( ! (ref $meth_array->[0] && ref $meth_array->[1]) ) {
+        warn "serialize_methods() called with illegal arguments (not code references). Disabling.";
+        $self->{'serialize_methods'} = undef
+    } else {
+        $self->{'serialize_methods'} = $meth_array;
+    }
 }
 
 sub forget_dead_hosts {
@@ -523,26 +585,41 @@ sub _set {
 
     if (ref $val) {
         die "append or prepend cannot take a reference" if $app_or_prep;
-        local $Carp::CarpLevel = 2;
-        $val = Storable::nfreeze($val);
+        local $Carp::CarpLevel = 3;
+        $val = eval { &{ $self->{'serialize_methods'}[0] }( $val ) };
         $flags |= F_STORABLE;
     }
     warn "value for memkey:$key is not defined" unless defined $val;
 
     my $len = length($val);
 
-    if ($self->{'compress_threshold'} && $HAVE_ZLIB && $self->{'compress_enable'} &&
-        $len >= $self->{'compress_threshold'} && !$app_or_prep) {
+    if ($self->{'compress_threshold'} && $self->{'compress_enable'} &&
+        $self->{'compress_methods'}   && !$app_or_prep &&
+        $len >= $self->{'compress_threshold'}) {
 
-        my $c_val = Compress::Zlib::memGzip($val);
-        my $c_len = length($c_val);
-
-        # do we want to keep it?
-        if ($c_len < $len*(1 - COMPRESS_SAVINGS)) {
-            $val = $c_val;
-            $len = $c_len;
-            $flags |= F_COMPRESS;
+        # wrap compress method in eval - it could be passed by the user and buggy
+        my $c_val;
+        eval {
+            &{ $self->{'compress_methods'}[0] }( \$val, \$c_val );
+        };
+        # if there was a problem, skip it
+        if ($@) {
+            print STDERR "compress_methods 0 (compress) failed: $@\n" if $self->{'debug'};
+        } else {
+            my $c_len = length($c_val);
+            # do we want to keep it?
+            if ($c_len < $len*$self->{'compress_ratio'}) {
+                $val = $c_val;
+                $len = $c_len;
+                $flags |= F_COMPRESS;
+            }
         }
+    }
+
+    if ($self->{'max_size'} && $len > $self->{'max_size'}) {
+        return; # mirror behavior of Cache::Memcached::Fast
+        # return 0; behave as other failures in Cache::Memcached
+        # return 1; "too_big_threshold" behavor from https://rt.cpan.org/Ticket/Display.html?id=35611
     }
 
     $exptime = int($exptime || 0);
@@ -731,15 +808,28 @@ sub _load_multi {
             # remove trailing \r\n
             chop $ret->{$k}; chop $ret->{$k};
 
-            $ret->{$k} = Compress::Zlib::memGunzip($ret->{$k})
-                if $HAVE_ZLIB && $flags & F_COMPRESS;
+            if ($flags & F_COMPRESS && $self->{'compress_methods'}) {
+                my $r_val;
+                # wrap compress method in eval - it could be passed by the user and buggy
+                eval {
+                    &{ $self->{'compress_methods'}[1] }( \$ret->{$k} , \$r_val );
+                };
+                # use it if it worked, or set to undef
+                # XXX: that's what Compress::Zlib::memGunzip failures would do
+                if ($@) {
+                    print STDERR "compress_methods 1 (decompress) failed: $@\n" if $self->{'debug'};
+                    $ret->{$k} = undef;
+                } else {
+                    $ret->{$k} = $r_val;
+                }
+            }
             if ($flags & F_STORABLE) {
                 # wrapped in eval in case a perl 5.6 Storable tries to
                 # unthaw data from a perl 5.8 Storable.  (5.6 is stupid
                 # and dies if the version number changes at all.  in 5.8
                 # they made it only die if it unencounters a new feature)
                 eval {
-                    $ret->{$k} = Storable::thaw($ret->{$k});
+                    $ret->{$k} = &{ $self->{'serialize_methods'}[1] }( $ret->{$k} );
                 };
                 # so if there was a problem, just treat it as a cache miss.
                 if ($@) {
@@ -1007,6 +1097,11 @@ Cache::Memcached - client library for memcached (memory cache daemon)
     'select_timeout'     => 1,
     'compress_enable'    => 1,
     'compress_threshold' => 10_000,
+    'compress_ratio'     => 0.8,
+    'compress_methods'   => [ sub { ${$_[1]} = Compress::Zlib::memGzip(${$_[0]})   },
+                              sub { ${$_[1]} = Compress::Zlib::memGunzip(${$_[0]}) }, ],
+    'serialize_methods'  => [ \&Storable::nfreeze, \&Storable::thaw ],
+    'max_size'           => 0,
   };
   $memd->set_servers($array_ref);
   $memd->set_compress_threshold(10_000);
@@ -1053,6 +1148,13 @@ Use C<compress_threshold> to set a compression threshold, in bytes.
 Values larger than this threshold will be compressed by C<set> and
 decompressed by C<get>.
 
+Use C<compress_ratio> to set the minimum amount of compression that
+will be considered usable.
+The value is a fractional number between 0 and 1. When L</compress_threshold>
+triggers the compression, compressed size should be less or equal to
+S<(original-size * I<compress_ratio>)>.
+Otherwise the data will be stored uncompressed.
+
 Use C<no_rehash> to disable finding a new memcached server when one
 goes down.  Your application may or may not need this, depending on
 your expirations and key usage.
@@ -1068,6 +1170,15 @@ to "bar", memcached is actually seeing you set "app1:foo" to "bar".
 Use C<connect_timeout> and C<select_timeout> to set connection and
 polling timeouts. The C<connect_timeout> defaults to .25 second, and
 the C<select_timeout> defaults to 1 second.
+
+Use C<compress_methods> to set custom compression/decompression
+methods. See L</set_compress_methods> for more information.
+
+Use C<serialize_methods> to set custom freeze/thaw
+methods. See L</set_serialize_methods> for more information.
+
+Use C<max_size> to set the maximum size of an item to be stored in memcached.
+See L</set_max_size> for more information.
 
 The other useful key is C<debug>, which when set to true will produce
 diagnostics on STDERR.
@@ -1100,6 +1211,10 @@ Sets the C<no_rehash> flag.  See C<new> constructor for more information.
 
 Sets the compression threshold. See C<new> constructor for more information.
 
+=item C<set_compress_ratio>
+
+Sets the minimum compression ratio. See C<new> constructor for more information.
+
 =item C<set_connect_timeout>
 
 Sets the connect timeout. See C<new> constructor for more information.
@@ -1113,9 +1228,85 @@ Sets the select timeout. See C<new> constructor for more information.
 Temporarily enable or disable compression.  Has no effect if C<compress_threshold>
 isn't set, but has an overriding effect if it is.
 
-=item C<set_compress_eanble>
+=item C<set_compress_methods>
 
-Alias for L</enable_compress>.
+  set_compress_methods( [ \&IO::Compress::Gzip::gzip,
+                          \&IO::Uncompress::Gunzip::gunzip ] )
+
+From L</new>:
+
+  compress_methods => [ \&IO::Compress::Gzip::gzip,
+                        \&IO::Uncompress::Gunzip::gunzip ]
+  (default: [ sub { ${$_[1]} = Compress::Zlib::memGzip(${$_[0]}) },
+              sub { ${$_[1]} = Compress::Zlib::memGunzip(${$_[0]}) } ]
+   when Compress::Zlib is available)
+
+The value is a reference to an array holding two code references for
+compression and decompression routines respectively.
+
+Compression routine is called when the size of the I<$value> passed to
+L</set> method family is greater than or equal to
+L</compress_threshold> (also see L</compress_ratio>).  The fact that
+compression was performed is remembered along with the data, and
+decompression routine is called on data retrieval with L</get> method
+family.  The interface of these routines should be the same as for
+B<IO::Compress> family (for instance see
+L<IO::Compress::Gzip::gzip|IO::Compress::Gzip/gzip> and
+L<IO::Uncompress::Gunzip::gunzip|IO::Uncompress::Gunzip/gunzip>).
+I.e. compression routine takes a reference to scalar value and a
+reference to scalar where compressed result will be stored.
+Decompression routine takes a reference to scalar with compressed data
+and a reference to scalar where uncompressed result will be stored.
+Both routines should return true on success, and false on error.
+
+By default we use L<Compress::Zlib|Compress::Zlib> because as of this
+writing it appears to be much faster than
+L<IO::Uncompress::Gunzip|IO::Uncompress::Gunzip>.
+
+=item C<set_serialize_methods>
+
+  set_serialize_methods( [ \&Storable::freeze, \&Storable::thaw ] )
+
+From L</new>:
+
+  serialize_methods => [ \&Storable::freeze, \&Storable::thaw ]
+  (default: [ \&Storable::nfreeze, \&Storable::thaw ])
+
+The value is a reference to an array holding two code references for
+serialization and deserialization routines respectively.
+
+Serialization routine is called when the I<$value> passed to L</set>
+method family is a reference.  The fact that serialization was
+performed is remembered along with the data, and deserialization
+routine is called on data retrieval with L</get> method family.  The
+interface of these routines should be the same as for
+L<Storable::nfreeze|Storable/nfreeze> and
+L<Storable::thaw|Storable/thaw>.  I.e. serialization routine takes a
+reference and returns a scalar string; it should not fail.
+Deserialization routine takes scalar string and returns a reference;
+if deserialization fails (say, wrong data format) it should throw an
+exception (call I<die>).  The exception will be caught by the module
+and L</get> will then pretend that the key hasn't been found.
+
+=item C<set_max_size>
+
+  max_size => 1024 * 1024
+  (default: 0)
+
+The value is a maximum size of an item to be stored in memcached.
+When trying to set a key to a value longer than I<max_size> bytes
+(after serialization and compression) nothing is sent to the server,
+and I<set> methods return I<undef>.
+
+Note that the real maximum on the server is less than 1MB, and depends
+on key length among other things.  So some values in the range
+S<I<[1MB - N bytes, 1MB]>>, where N is several hundreds, will still be
+sent to the server, and rejected there.  You may set I<max_size> to a
+smaller value to avoid this.
+
+Note that L<Cache::Memcached::Fast> defaults to 1024*1024 (1mb).
+For backward compatability with previous versions of L<Cache::Memcached>,
+the default here is to disable this feature (0).
 
 =item C<get>
 

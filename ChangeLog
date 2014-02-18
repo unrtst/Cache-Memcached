@@ -1,3 +1,22 @@
+2014-02-19: version 1.32
+
+    * Add many features currently found in Cache::Memcached::Fast:
+        compress_ratio
+        max_size
+        compress_methods
+        serialize_methods
+
+    * Add tests for new features:
+        t/08_compression.t
+        t/09_serialize_methods.t
+        t/10_compress_methods.t
+        t/13_max_size.t
+        t/14_compress_ratio.t
+
+    * Add benchmark scripts:
+        script/benchmark_method_overrides.pl
+        script/benchmark_simple.pl
+
 2014-02-19: version 1.31
 
     * Fix delete with utf8 keys. Added tests for it.

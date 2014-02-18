@@ -9,7 +9,7 @@ my $testaddr = "127.0.0.1:11211";
 my $msock = IO::Socket::INET->new(PeerAddr => $testaddr,
                                   Timeout  => 3);
 if ($msock) {
-    plan tests => 6;
+    plan tests => 8;
 } else {
     plan skip_all => "No memcached instance running at $testaddr\n";
     exit 0;
@@ -39,6 +39,27 @@ $rand .= chr(rand(255)) for 1 .. (1024*256);
 
 ok($memd->set("key2", $rand), "set key2 to 512k of repeated 'A'");
 is($memd->get("key2"), $rand, "get key2 is same string");
+
+SKIP: {
+    skip "test requires Cache::Memcached version 1.31 or higher.", 2
+        unless $Cache::Memcached::VERSION > 1.30;
+
+    # make a new instance that lets us peek at the uncompresed value
+    my $memd2 = Cache::Memcached->new({
+        servers   => [ $testaddr ],
+        namespace => $namespace,
+        compress_enable => 0, # this does not disable decompression
+        # set decompressd to the raw data from memcached
+        compress_methods => [
+            sub { ${$_[1]} = ${$_[0]} },
+            sub { ${$_[1]} = ${$_[0]} },
+        ]
+    });
+    $memd->enable_compress(0);
+
+    isnt($memd2->get("key1"), "".("A" x (1024*512)),  "get compressed key1 is different string");
+    cmp_ok( length($memd2->get("key1")), '<', (1024*512),  "get compressed key1 is smaller than original");
+};
 
 # clean up after ourselves
 ok($memd->delete("key1"), "delete key1");
