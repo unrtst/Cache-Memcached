@@ -14,7 +14,7 @@ my $testaddr = "127.0.0.1:11211";
 my $msock = IO::Socket::INET->new(PeerAddr => $testaddr,
                                   Timeout  => 3);
 if ($msock) {
-    plan tests => 20;
+    plan tests => 22;
 } else {
     plan skip_all => "No memcached instance running at $testaddr\n";
     exit 0;
@@ -54,9 +54,9 @@ ok($memd->delete("key1"), "delete key1");
 ok(! $memd->get("key1"), "get key1 properly failed");
 
 SKIP: {
-  skip "Could not parse server version; version.pm 0.77 required", 7
+  skip "Could not parse server version; version.pm 0.77 required", 8
       unless $memcached_version;
-  skip "Only using prepend/append on memcached >= 1.2.4, you have $memcached_version", 7
+  skip "Only using prepend/append on memcached >= 1.2.4, you have $memcached_version", 8
       unless $memcached_version && $memcached_version >= v1.2.4;
 
   ok(! $memd->append("key-noexist", "bogus"), "append key-noexist properly failed");
@@ -65,7 +65,10 @@ SKIP: {
   ok($memd->append("key3", "-end"), "appended -end to key3");
   ok($memd->get("key3", "base-end"), "key3 is base-end");
   ok($memd->prepend("key3", "start-"), "prepended start- to key3");
-  ok($memd->get("key3", "start-base-end"), "key3 is base-end");
+  ok($memd->get("key3", "start-base-end"), "key3 is start-base-end");
+
+  # clean up after ourselves
+  ok($memd->delete("key3"), "delete key3");
 }
 
 # also test creating the object with a list rather than a hash-ref
@@ -75,3 +78,7 @@ my $mem2 = Cache::Memcached->new(
                                 );
 isa_ok($mem2, 'Cache::Memcached');
 ok($mem2->{debug}, "debug is set on alt constructed instance");
+
+# clean up after ourselves
+#ok($memd->delete("key1"), "delete key1"); # already deleted
+ok($memd->delete("key2"), "delete key2");
