@@ -15,6 +15,8 @@ if ($msock) {
     exit 0;
 }
 
+close $msock;
+
 my $memd = Cache::Memcached->new({
     servers   => [ $testaddr ],
     namespace => "Cache::Memcached::t/$$/" . (time() % 100) . "/",

@@ -20,6 +20,8 @@ if ($msock) {
     exit 0;
 }
 
+close $msock;
+
 my $namespace_1 = "Cache::Memcached::t/$$/" . (time() % 100) . "1/";
 my $namespace_2 = "Cache::Memcached::t/$$/" . (time() % 100) . "2/";
 

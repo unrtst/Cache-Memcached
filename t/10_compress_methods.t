@@ -15,6 +15,8 @@ if ($msock) {
     exit 0;
 }
 
+close $msock;
+
 my $namespace = "Cache::Memcached::t/$$/" . (time() % 100) . "/";
 
 my $memd = Cache::Memcached->new({
