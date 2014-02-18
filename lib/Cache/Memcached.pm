@@ -195,6 +195,12 @@ sub enable_compress {
     $self->{'compress_enable'} = $enable;
 }
 
+sub set_compress_enable {
+    my Cache::Memcached $self = shift;
+    my ($enable) = @_;
+    $self->{'compress_enable'} = $enable;
+}
+
 sub set_compress_methods {
     my Cache::Memcached $self = shift;
     my $meth_array = $_[0];
@@ -1227,6 +1233,10 @@ Sets the select timeout. See C<new> constructor for more information.
 
 Temporarily enable or disable compression.  Has no effect if C<compress_threshold>
 isn't set, but has an overriding effect if it is.
+
+=item C<set_compress_enable>
+
+Alias for L</enable_compress>.
 
 =item C<set_compress_methods>
 
