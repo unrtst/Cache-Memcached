@@ -1,3 +1,15 @@
+2014-02-19: version 1.31
+
+    * Fix delete with utf8 keys. Added tests for it.
+        lib/Cache/Memcached.pm, t/06_utf8_key.t
+        https://rt.cpan.org/Ticket/Display.html?id=93094
+
+    * Fix usage of compress_enable in new(). It was hardcoded to enabled.
+        Options now override that setting. Updated docs to reflect that update.
+        Added set_compress_enable as an alias of enable_compress.
+
+    * Update tests to delete any keys that the test adds.
+
 2012-05-19: version 1.30
 
 	* Fix buck2sock corruption that causes errors like
@@ -42,7 +54,7 @@
 
 	* don't include "stats sizes" by default in the stats method,
 	  as that can hang big servers for a few seconds (Brad Fitzpatrick)
-	
+
 2009-05-02: version 1.25
 
 	* Clear @buck2sock when calling disconnect_all.  (Dennis Stosberg,
