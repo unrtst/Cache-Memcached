@@ -1256,9 +1256,9 @@ methods. See L</set_compress_methods> for more information.
 Use C<serialize_methods> to set custom freeze/thaw
 methods. See L</set_serialize_methods> for more information.
 
-Use C<enable_key_hasing> to transparently use a one way hash
+Use C<enable_key_hashing> to transparently use a one way hash
 (ex. Digest::MD5::md5_base64) for the key stored on the memcached servers.
-See L</enable_key_hasing> for more information.
+See L</enable_key_hashing> for more information.
 
 Use C<key_hash_method> to set the method used to internally hash
 keys. See L</set_key_hash_method> for more information.
