@@ -10,6 +10,9 @@
 
     * Update tests to delete any keys that the test adds.
 
+    * Added additional tests:
+        t/07_storable.t t/08_compression.t t/15_namespace.t t/test_structs.pl
+
 2012-05-19: version 1.30
 
 	* Fix buck2sock corruption that causes errors like
