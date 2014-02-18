@@ -17,6 +17,7 @@
         max_size
         compress_methods
         serialize_methods
+        hash_namespace
 
     * Add tests for new features:
         t/08_compression.t
@@ -24,6 +25,7 @@
         t/10_compress_methods.t
         t/13_max_size.t
         t/14_compress_ratio.t
+        t/16_hash_namespace.t
 
     * Add benchmark scripts:
         script/benchmark_method_overrides.pl

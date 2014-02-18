@@ -28,6 +28,7 @@ use fields qw{
     parser_class
     buck2sock buck2sock_generation
     compress_ratio     max_size
+    hash_namespace     prefix_hash
     compress_methods   serialize_methods
     enable_key_hashing key_hash_method
 };
@@ -83,6 +84,7 @@ sub new {
     $self->{'no_rehash'} = $args->{'no_rehash'};
     $self->{'stats'} = {};
     $self->{'pref_ip'} = $args->{'pref_ip'} || {};
+    $self->{'hash_namespace'}     = $args->{'hash_namespace'} || 0;
     $self->{'compress_threshold'} = $args->{'compress_threshold'};
     $self->{'compress_ratio'}     = $args->{'compress_ratio'} || DEFAULT_COMPRESS_RATIO;
     $self->{'compress_enable'}    = (exists $args->{'compress_enable'} && length $args->{'compress_enable'})
@@ -140,6 +142,13 @@ sub new {
     $self->{'select_timeout'}  = $args->{'select_timeout'}  || 1.0;
     $self->{namespace} = $args->{namespace} || '';
     $self->{namespace_len} = length $self->{namespace};
+
+    # set crc32 prefix used when determining server (to be combined with crc32 of key)
+    if ($self->{'hash_namespace'}) {
+        $self->{'prefix_hash'} = crc32( $self->{'namespace'} );
+    } else {
+        $self->{'prefix_hash'} = 0; # behave as if it isn't there
+    }
 
     return $self;
 }
@@ -213,6 +222,19 @@ sub set_max_size {
     my Cache::Memcached $self = shift;
     my ($size) = @_;
     $self->{'max_size'} = $size;
+}
+
+sub set_hash_namespace {
+    my Cache::Memcached $self = shift;
+    my ($enable) = @_;
+
+    if ($enable) {
+        $self->{'prefix_hash'} = crc32( $self->{'namespace'} );
+    } else {
+        $self->{'prefix_hash'} = 0; # behave as if it isn't there
+    }
+
+    $self->{'hash_namespace'} = $enable;
 }
 
 sub enable_compress {
@@ -465,7 +487,7 @@ sub get_sock { # (key)
 
     my $real_key = ref $key ? $key->[1] : $key;
     $real_key = $self->{'key_hash_method'}->( $real_key ) if $self->{'enable_key_hashing'};
-    my $hv = ref $key ? int($key->[0]) : _hashfunc($real_key);
+    my $hv = ref $key ? int($key->[0]) : _hashfunc($real_key, $self->{'prefix_hash'});
 
     my $tries = 0;
     while ($tries++ < 20) {
@@ -473,7 +495,7 @@ sub get_sock { # (key)
         my $sock = $self->sock_to_host($host);
         return $sock if $sock;
         return undef if $self->{'no_rehash'};
-        $hv += _hashfunc($tries . $real_key);  # stupid, but works
+        $hv += _hashfunc($tries . $real_key, $self->{'prefix_hash'});  # stupid, but works
     }
     return undef;
 }
@@ -791,7 +813,7 @@ sub get_multi {
         foreach my $key (@_) {
             my $real_key = ref $key ? $key->[1] : $key;
             $real_key = $key_to_hash_map{ $real_key } if $self->{'enable_key_hashing'};
-            my $hv = ref $key ? int($key->[0]) : _hashfunc($real_key);
+            my $hv = ref $key ? int($key->[0]) : _hashfunc($real_key, $self->{'prefix_hash'});
 
             my $tries;
             while (1) {
@@ -809,7 +831,7 @@ sub get_multi {
                 }
 
                 next KEY if $tries++ >= 20;
-                $hv += _hashfunc($tries . $real_key);
+                $hv += _hashfunc($tries . $real_key, $self->{'prefix_hash'});
             }
 
             push @{$sock_keys{$sock}}, $real_key;
@@ -1020,7 +1042,7 @@ sub _load_multi {
 }
 
 sub _hashfunc {
-    return (crc32($_[0]) >> 16) & 0x7fff;
+    return (crc32($_[0], $_[1]) >> 16) & 0x7fff;
 }
 
 sub flush_all {
@@ -1170,6 +1192,7 @@ Cache::Memcached - client library for memcached (memory cache daemon)
                    "10.0.0.17:11211", [ "10.0.0.17:11211", 3 ] ],
     'debug'              => 0,
     'namespace'          => '',
+    'hash_namespace'     => 0,
     'connect_timeout'    => 0.25,
     'select_timeout'     => 1,
     'compress_enable'    => 1,
@@ -1245,6 +1268,9 @@ profiling cases only.
 Use C<namespace> to prefix all keys with the provided namespace value.
 That is, if you set namespace to "app1:" and later do a set of "foo"
 to "bar", memcached is actually seeing you set "app1:foo" to "bar".
+
+Use C<hash_namespace> to enable/disable the hashing of the namespace
+key prefix. See L</set_hash_namespace> for more information.
 
 Use C<connect_timeout> and C<select_timeout> to set connection and
 polling timeouts. The C<connect_timeout> defaults to .25 second, and
@@ -1445,6 +1471,35 @@ smaller value to avoid this.
 Note that L<Cache::Memcached::Fast> defaults to 1024*1024 (1mb).
 For backward compatability with previous versions of L<Cache::Memcached>,
 the default here is to disable this feature (0).
+
+=item C<set_hash_namespace>
+
+  hash_namespace => 1
+  (default: disabled)
+
+The value is a boolean which enables (true) or disables (false) the
+hashing of the namespace key prefix.  By default for (backward) compatibility
+with B<Cache::Memcached> namespace prefix is not hashed along with the
+key.  Thus
+
+  namespace => 'prefix/',
+  ...
+  $memd->set('key', $val);
+
+may use different B<memcached> server than
+
+  namespace => '',
+  ...
+  $memd->set('prefix/key', $val);
+
+because hash values of I<'key'> and I<'prefix/key'> may be different.
+
+However sometimes is it necessary to hash the namespace prefix, for
+instance for interoperability with other clients that do not have the
+notion of the namespace.  When I<hash_namespace> is enabled, both
+examples above will use the same server, the one that I<'prefix/key'>
+is mapped to.  Note that there's no performance penalty then, as
+namespace prefix is hashed only once.
 
 =item C<get>
 
