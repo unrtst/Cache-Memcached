@@ -77,7 +77,10 @@ sub new {
     $self->{'stats'} = {};
     $self->{'pref_ip'} = $args->{'pref_ip'} || {};
     $self->{'compress_threshold'} = $args->{'compress_threshold'};
-    $self->{'compress_enable'}    = 1;
+    $self->{'compress_enable'}    = (exists $args->{'compress_enable'} && length $args->{'compress_enable'})
+                                  ? $args->{'compress_enable'}
+                                  : 1;
+
     $self->{'stat_callback'} = $args->{'stat_callback'} || undef;
     $self->{'readonly'} = $args->{'readonly'};
     $self->{'parser_class'} = $args->{'parser_class'} || $parser_class;
@@ -151,6 +154,12 @@ sub set_compress_threshold {
 }
 
 sub enable_compress {
+    my Cache::Memcached $self = shift;
+    my ($enable) = @_;
+    $self->{'compress_enable'} = $enable;
+}
+
+sub set_compress_eanble {
     my Cache::Memcached $self = shift;
     my ($enable) = @_;
     $self->{'compress_enable'} = $enable;
@@ -459,6 +468,11 @@ sub delete {
     $self->{'stats'}->{"delete"}++;
     $key = ref $key ? $key->[1] : $key;
     $time = $time ? " $time" : "";
+
+    # key reconstituted from server won't have utf8 on, so turn it off on input
+    # scalar to allow hash lookup to succeed
+    Encode::_utf8_off($key) if Encode::is_utf8($key);
+
     my $cmd = "delete $self->{namespace}$key$time\r\n";
     my $res = _write_and_read($self, $sock, $cmd);
 
@@ -987,7 +1001,11 @@ Cache::Memcached - client library for memcached (memory cache daemon)
   $memd = new Cache::Memcached {
     'servers' => [ "10.0.0.15:11211", "10.0.0.15:11212", "/var/sock/memcached",
                    "10.0.0.17:11211", [ "10.0.0.17:11211", 3 ] ],
-    'debug' => 0,
+    'debug'              => 0,
+    'namespace'          => '',
+    'connect_timeout'    => 0.25,
+    'select_timeout'     => 1,
+    'compress_enable'    => 1,
     'compress_threshold' => 10_000,
   };
   $memd->set_servers($array_ref);
@@ -1026,6 +1044,10 @@ former and an integer weight value.  (The default weight if
 unspecified is 1.)  It's recommended that weight values be kept as low
 as possible, as this module currently allocates memory for bucket
 distribution proportional to the total host weights.
+
+Use C<compress_enable> to enable/disable compression of values.
+Default is 1, enabled.
+NOTE: passing "undef" is not recognized as disable. Pass 0 to disable.
 
 Use C<compress_threshold> to set a compression threshold, in bytes.
 Values larger than this threshold will be compressed by C<set> and
@@ -1090,6 +1112,10 @@ Sets the select timeout. See C<new> constructor for more information.
 
 Temporarily enable or disable compression.  Has no effect if C<compress_threshold>
 isn't set, but has an overriding effect if it is.
+
+=item C<set_compress_eanble>
+
+Alias for L</enable_compress>.
 
 =item C<get>
 
