@@ -25,9 +25,9 @@ my $namespace = "Cache::Memcached::t/$$/" . (time() % 100) . "/";
 my $memd = Cache::Memcached->new({
     servers   => [ $testaddr ],
     namespace => $namespace,
-    enable_key_hashing  => 1,
+    digest_keys_enable  => 1,
     # fake in a key hashing method that lets us easily debug it
-    key_hash_method => sub { substr( $_[0], -1)."abcd" },
+    digest_keys_method => sub { substr( $_[0], -1)."abcd" },
 });
 
 #### basic operation
@@ -63,10 +63,10 @@ is_deeply(
 my $memd2 = Cache::Memcached->new({
     servers   => [ $testaddr ],
     namespace => $namespace,
-    enable_key_hashing  => 0,
+    digest_keys_enable  => 0,
 });
 
-# confirm it got hashed in the server using our custom key_hash_method
+# confirm it got hashed in the server using our custom digest_keys_method
 is($memd2->get("1abcd"), "val1", "introspective get 1abcd (hashed key1) is val1");
 is($memd2->get("3abcd"), "val3", "introspective get 3abcd (hashed key3) is val3");
 
@@ -112,9 +112,9 @@ while (my ($method, $lib) = each %other_modules) {
         my $memd = Cache::Memcached->new({
             servers   => [ $testaddr ],
             namespace => $mod_namespace,
-            enable_key_hashing  => 1,
+            digest_keys_enable  => 1,
             # fake in a key hashing method that lets us easily debug it
-            key_hash_method => sub { no strict 'refs'; &{$method}( $_[0] ) },
+            digest_keys_method => sub { no strict 'refs'; &{$method}( $_[0] ) },
         });
 
         ok($memd->set("key1", "val1"), "[$method] set key1 as val1");

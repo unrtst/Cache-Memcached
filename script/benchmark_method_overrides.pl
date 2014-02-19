@@ -97,14 +97,14 @@ my %instances = (
         servers => \@addrs,
         select_timeout => 2,
         compress_enable => 0,
-        enable_key_hashing => 1,
+        digest_keys_enable => 1,
     }),
     'compress_HK'   => Cache::Memcached->new({
         servers => \@addrs,
         select_timeout => 2,
         compress_enable => 1,
         compress_threshold => 500, # bytes
-        enable_key_hashing => 1,
+        digest_keys_enable => 1,
     }),
     'lz4_HK'        => Cache::Memcached->new({
         servers => \@addrs,
@@ -115,7 +115,7 @@ my %instances = (
             sub { ${$_[1]} = Compress::LZ4::compress( $_[0] )   },
             sub { ${$_[1]} = Compress::LZ4::decompress( $_[0] ) },
         ],
-        enable_key_hashing => 1,
+        digest_keys_enable => 1,
     }),
     'jsonxs_HK'     => Cache::Memcached->new({
         servers => \@addrs,
@@ -126,7 +126,7 @@ my %instances = (
             sub { JSON::XS::encode_json($_[0]) },
             sub { JSON::XS::decode_json($_[0]) },
         ],
-        enable_key_hashing => 1,
+        digest_keys_enable => 1,
     }),
     'lz4jsonxs_HK'  => Cache::Memcached->new({
         servers => \@addrs,
@@ -141,7 +141,7 @@ my %instances = (
             sub { JSON::XS::encode_json($_[0]) },
             sub { JSON::XS::decode_json($_[0]) },
         ],
-        enable_key_hashing => 1,
+        digest_keys_enable => 1,
     }),
 );
 # make sure compress_enable is set correctly (version <= 1.30 did not accept it to new())

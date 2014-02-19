@@ -1,7 +1,7 @@
 #!/usr/bin/env perl -w
 
 # NOTE: this test is (and should be) an exact duplicate of 02_keys.t with one exception:
-#   Cache::Memcached instantiated with "enable_key_hashing => 1".
+#   Cache::Memcached instantiated with "digest_keys_enable => 1".
 
 use strict;
 use Test::More;
@@ -26,7 +26,7 @@ if ($msock) {
 my $memd = Cache::Memcached->new({
     servers   => [ $testaddr ],
     namespace => "Cache::Memcached::t/$$/" . (time() % 100) . "/",
-    enable_key_hashing  => 1,
+    digest_keys_enable  => 1,
 });
 
 isa_ok($memd, 'Cache::Memcached');
