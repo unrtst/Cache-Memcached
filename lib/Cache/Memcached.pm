@@ -30,7 +30,7 @@ use fields qw{
     compress_ratio     max_size
     hash_namespace     prefix_hash
     compress_methods   serialize_methods
-    enable_key_hashing key_hash_method
+    digest_keys_enable digest_keys_method
 };
 
 # flag definitions
@@ -112,29 +112,29 @@ sub new {
         $self->{'serialize_methods'} = [ \&Storable::nfreeze, \&Storable::thaw ];
     }
 
-    # implicitly enabled (but user can override via enable_key_hashing)
-    if (exists $args->{'key_hash_method'} && ref $args->{'key_hash_method'}) {
-        $self->{'enable_key_hashing'} = defined $args->{'enable_key_hashing'}
-                                      ? $args->{'enable_key_hashing'}
+    # implicitly enabled (but user can override via digest_keys_enable)
+    if (exists $args->{'digest_keys_method'} && ref $args->{'digest_keys_method'}) {
+        $self->{'digest_keys_enable'} = defined $args->{'digest_keys_enable'}
+                                      ? $args->{'digest_keys_enable'}
                                       : 1;
-        $self->{'key_hash_method'} = $args->{'key_hash_method'};
+        $self->{'digest_keys_method'} = $args->{'digest_keys_method'};
     }
     # enable built in key hashing
-    elsif ($args->{'enable_key_hashing'}) {
+    elsif ($args->{'digest_keys_enable'}) {
         eval { require Digest::MD5 };
         if ($@) {
-            print STDERR "Cache::Memcached: enable_key_hashing requested, but unable to load Digest::MD5: $@\n" if $self->{'debug'};
-            $self->{'enable_key_hashing'} = 0;
-            $self->{'key_hash_method'} = undef;
+            print STDERR "Cache::Memcached: digest_keys_enable requested, but unable to load Digest::MD5: $@\n" if $self->{'debug'};
+            $self->{'digest_keys_enable'} = 0;
+            $self->{'digest_keys_method'} = undef;
         } else {
-            $self->{'enable_key_hashing'} = 1;
-            $self->{'key_hash_method'} = sub { Digest::MD5::md5_base64($_[0]) };
+            $self->{'digest_keys_enable'} = 1;
+            $self->{'digest_keys_method'} = sub { Digest::MD5::md5_base64($_[0]) };
         }
     }
     # default is disabled
     else {
-        $self->{'enable_key_hashing'} = 0;
-        $self->{'key_hash_method'} = undef;
+        $self->{'digest_keys_enable'} = 0;
+        $self->{'digest_keys_method'} = undef;
     }
 
     # TODO: undocumented
@@ -249,26 +249,26 @@ sub set_compress_enable {
     $self->{'compress_enable'} = $enable;
 }
 
-sub enable_key_hashing {
+sub digest_keys_enable {
     my Cache::Memcached $self = shift;
     my ($enable) = @_;
-    # no effect if key_hash_method is not set
-    if (ref $self->{'key_hash_method'}) {
-        $self->{'enable_key_hashing'} = $enable;
+    # no effect if digest_keys_method is not set
+    if (ref $self->{'digest_keys_method'}) {
+        $self->{'digest_keys_enable'} = $enable;
     } else {
-        $self->{'enable_key_hashing'} = 0;
+        $self->{'digest_keys_enable'} = 0;
     }
 }
 
-sub set_key_hash_method {
+sub set_digest_keys_method {
     my Cache::Memcached $self = shift;
     my ($subref) = @_;
     if (ref $subref) {
-        $self->{'key_hash_method'} = $subref;
+        $self->{'digest_keys_method'} = $subref;
     } else {
-        warn "key_hash_method() called with invalid value (not a subref). Disabling.";
-        $self->enable_key_hashing(0);
-        $self->{'key_hash_method'} = undef
+        warn "digest_keys_method() called with invalid value (not a subref). Disabling.";
+        $self->digest_keys_enable(0);
+        $self->{'digest_keys_method'} = undef
     }
 }
 
@@ -479,6 +479,15 @@ sub sock_to_host { # (host)  #why is this public? I wouldn't have to worry about
     return $sock;
 }
 
+#XXX: performance note regarding digest_keys_method...
+#     When digest_keys_enabled, digest_keys_method is called twice for most operations:
+#       1. in the method (ex. delete()) to get the key to send to memcached server
+#       2. in the call to get_sock to figure out what server to use
+#     I benchmarked using a method to cache that result in an instance variable.
+#     It performed worse than simply calling the digest_keys_method twice (assuming
+#     the use of Digest::MD5::md5_base64).
+#     In summary, leave it at two separate calls until you bench the caching.
+#       (see script/benchmark_digest_keys_caching.pl)
 sub get_sock { # (key)
     my Cache::Memcached $self = $_[0];
     my $key = $_[1];
@@ -486,7 +495,7 @@ sub get_sock { # (key)
     return undef unless $self->{'active'};
 
     my $real_key = ref $key ? $key->[1] : $key;
-    $real_key = $self->{'key_hash_method'}->( $real_key ) if $self->{'enable_key_hashing'};
+    $real_key = $self->{'digest_keys_method'}->( $real_key ) if $self->{'digest_keys_enable'};
     my $hv = ref $key ? int($key->[0]) : _hashfunc($real_key, $self->{'prefix_hash'});
 
     my $tries = 0;
@@ -608,7 +617,7 @@ sub delete {
 
     $self->{'stats'}->{"delete"}++;
     $key = ref $key ? $key->[1] : $key;
-    $key = $self->{'key_hash_method'}->( $key ) if $self->{'enable_key_hashing'};
+    $key = $self->{'digest_keys_method'}->( $key ) if $self->{'digest_keys_enable'};
     $time = $time ? " $time" : "";
 
     # key reconstituted from server won't have utf8 on, so turn it off on input
@@ -662,7 +671,7 @@ sub _set {
     $self->{'stats'}->{$cmdname}++;
     my $flags = 0;
     my $real_key = $key = ref $key ? $key->[1] : $key;
-    $key = $self->{'key_hash_method'}->( $key ) if $self->{'enable_key_hashing'};
+    $key = $self->{'digest_keys_method'}->( $key ) if $self->{'digest_keys_enable'};
 
     if (ref $val) {
         die "append or prepend cannot take a reference" if $app_or_prep;
@@ -740,7 +749,7 @@ sub _incrdecr {
     my $sock = $self->get_sock($key);
     return undef unless $sock;
     $key = $key->[1] if ref $key;
-    $key = $self->{'key_hash_method'}->( $key ) if $self->{'enable_key_hashing'};
+    $key = $self->{'digest_keys_method'}->( $key ) if $self->{'digest_keys_enable'};
     $self->{'stats'}->{$cmdname}++;
     $value = 1 unless defined $value;
 
@@ -785,8 +794,8 @@ sub get_multi {
     # ... cache the reverse do we do not have to call the digest methods twice
     my %hash_to_key_map;
     my %key_to_hash_map;
-    if ($self->{'enable_key_hashing'}) {
-        %hash_to_key_map = map { $self->{'key_hash_method'}->( $_ ) => $_ } @_;
+    if ($self->{'digest_keys_enable'}) {
+        %hash_to_key_map = map { $self->{'digest_keys_method'}->( $_ ) => $_ } @_;
         %key_to_hash_map = map { $hash_to_key_map{$_} => $_ } keys %hash_to_key_map;
     }
 
@@ -797,7 +806,7 @@ sub get_multi {
         }
         foreach my $key (@_) {
             my $kval = ref $key ? $key->[1] : $key;
-            $kval = $key_to_hash_map{ $kval } if $self->{'enable_key_hashing'};
+            $kval = $key_to_hash_map{ $kval } if $self->{'digest_keys_enable'};
             push @{$sock_keys{$sock}}, $kval;
         }
     } else {
@@ -812,7 +821,7 @@ sub get_multi {
       KEY:
         foreach my $key (@_) {
             my $real_key = ref $key ? $key->[1] : $key;
-            $real_key = $key_to_hash_map{ $real_key } if $self->{'enable_key_hashing'};
+            $real_key = $key_to_hash_map{ $real_key } if $self->{'digest_keys_enable'};
             my $hv = ref $key ? int($key->[0]) : _hashfunc($real_key, $self->{'prefix_hash'});
 
             my $tries;
@@ -846,7 +855,7 @@ sub get_multi {
     _load_multi($self, \%sock_keys, \%val);
 
     # map the hashed keys back to user provided key values
-    if ($self->{'enable_key_hashing'}) {
+    if ($self->{'digest_keys_enable'}) {
         foreach my $k (keys %val) {
             $val{ $hash_to_key_map{$k} } = delete $val{$k};
         }
@@ -1201,8 +1210,8 @@ Cache::Memcached - client library for memcached (memory cache daemon)
     'compress_methods'   => [ sub { ${$_[1]} = Compress::Zlib::memGzip(${$_[0]})   },
                               sub { ${$_[1]} = Compress::Zlib::memGunzip(${$_[0]}) }, ],
     'serialize_methods'  => [ \&Storable::nfreeze, \&Storable::thaw ],
-    'enable_key_hashing' => 0,
-    'key_hash_method'    => sub { Digest::MD5::md5_base64( $_ ) },
+    'digest_keys_enable' => 0,
+    'digest_keys_method' => sub { Digest::MD5::md5_base64( $_ ) },
     'max_size'           => 0,
   };
   $memd->set_servers($array_ref);
@@ -1282,12 +1291,12 @@ methods. See L</set_compress_methods> for more information.
 Use C<serialize_methods> to set custom freeze/thaw
 methods. See L</set_serialize_methods> for more information.
 
-Use C<enable_key_hashing> to transparently use a one way hash
+Use C<digest_keys_enable> to transparently use a one way hash
 (ex. Digest::MD5::md5_base64) for the key stored on the memcached servers.
-See L</enable_key_hashing> for more information.
+See L</digest_keys_enable> for more information.
 
-Use C<key_hash_method> to set the method used to internally hash
-keys. See L</set_key_hash_method> for more information.
+Use C<digest_keys_method> to set the method used to internally hash
+keys. See L</set_digest_keys_method> for more information.
 
 Use C<max_size> to set the maximum size of an item to be stored in memcached.
 See L</set_max_size> for more information.
@@ -1344,10 +1353,10 @@ isn't set, but has an overriding effect if it is.
 
 Alias for L</enable_compress>.
 
-=item C<enable_key_hashing>
+=item C<digest_keys_enable>
 
 Enable to disable mapping keys to a hash (ex. Digest::MD5::md5_base64($key)).
-Has no effect unless C<key_hash_method> is set to a usable value.
+Has no effect unless C<digest_keys_method> is set to a usable value.
 
 This enables the use of arbitrarily large keys. The memcached protocol
 supports a maximum key size of 250 bytes. Using an md5_base64 of the
@@ -1357,15 +1366,15 @@ very large and verbose keys, and they will still work and will not
 hurt network or memcached server performance. L<Digest::MD5> is quite
 fast, so its use has very little impact on performance.
 
-This can be used to temporarily enable/disable this feature.
+This method can be used to temporarily enable/disable this feature.
 
-=item C<set_key_hash_method>
+=item C<set_digest_keys_method>
 
-  set_key_hash_method( sub { Digest::SHA::sha256_base64($_) } )
+  set_digest_keys_method( sub { Digest::SHA::sha256_base64($_) } )
 
 From L</new>:
 
-  key_hash_method => sub { Digest::SHA::sha256_base64($_) }
+  digest_keys_method => sub { Digest::SHA::sha256_base64($_) }
   (default: sub { Digest::MD5::md5_base64($_) })
 
 The value is a code reference applied to all keys before they are
@@ -1380,10 +1389,10 @@ NOTE:
 =over
 
 While tempting, this does not allow you to use a hash, array, or
-other reference as a key along with L<Storable> in your L</key_hash_method>.
+other reference as a key along with L<Storable> in your L</digest_keys_method>.
 For example, this will not work:
 
-    set_key_hash_method(
+    set_digest_keys_method(
         sub { Digest::MD5::md5_base64( ref($_[0]) ? Storable($_[0]) : $_[0] ) }
     );
 

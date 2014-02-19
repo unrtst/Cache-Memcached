@@ -1,5 +1,5 @@
 2014-02-19: version 1.33
-    * Add enable_key_hashing/key_hash_method support.
+    * Add digest_keys_enable/digest_keys_method support.
         If enabled, all memcached keys are hashed (ex. Digest::MD5::md5_base64)
         before being sent to the memcached server, and mapped back to user supplied
         values when needed (get_multi). IE. it's transparent to the user, and
@@ -9,6 +9,9 @@
         script/benchmark_method_overrides.pl
         t/11_digest_keys_simple.t
         t/12_digest_keys_more.t
+
+    * Add benchmark to gauge possibility of adding caching to digest key generation.
+        script/benchmark_digest_keys_caching.pl
 
 2014-02-19: version 1.32
 
