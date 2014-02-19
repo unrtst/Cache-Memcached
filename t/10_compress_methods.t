@@ -33,17 +33,23 @@ my $memd = Cache::Memcached->new({
 # Cache::Memcached <= 1.30 does not set enable_compress via new
 $memd->enable_compress(1);
 
+#XXX: NOTE: large keys that could be checked with "is()" are being
+#     checked with "ok" because, if there is an error, "is()"
+#     would dump out an obscene amount of data to the screen.
+
 
 # stick in a value that is highly compressable
 ok($memd->set("key1", "".("A" x (1024*512)) ), "set key1 to 512k of repeated 'A'");
-is($memd->get("key1"), "DAAAAAAAAAA",          "get key1 gets expected value");
+#is($memd->get("key1"), "DAAAAAAAAAA",          "get key1 gets expected value");
+ok($memd->get("key1") eq "DAAAAAAAAAA",          "get key1 gets expected value");
 
 # make a big random string
 my $rand;
 $rand .= chr(rand(255)) for 1 .. (1024*256);
 
 ok($memd->set("key2", $rand), "set key2 to 512k of repeated 'A'");
-is($memd->get("key2"), "D".substr($rand, 0, 10), "get key2 gets expected value");
+#is($memd->get("key2"), "D".substr($rand, 0, 10), "get key2 gets expected value");
+ok($memd->get("key2") eq "D".substr($rand, 0, 10), "get key2 gets expected value");
 
 # make a new instance that lets us peek at the uncompresed value
 my $memd2 = Cache::Memcached->new({
@@ -59,8 +65,10 @@ my $memd2 = Cache::Memcached->new({
 # Cache::Memcached <= 1.30 does not set enable_compress via new
 $memd2->enable_compress(0);
 
-is($memd2->get("key1"), "AAAAAAAAAAC",            "get compressed key1");
-is($memd2->get("key2"), substr($rand, 0, 10)."C", "get compressed key2");
+#is($memd2->get("key1"), "AAAAAAAAAAC",            "get compressed key1");
+#is($memd2->get("key2"), substr($rand, 0, 10)."C", "get compressed key2");
+ok($memd2->get("key1") eq "AAAAAAAAAAC",            "get compressed key1");
+ok($memd2->get("key2") eq substr($rand, 0, 10)."C", "get compressed key2");
 
 # clean up after ourselves
 ok($memd->delete("key1"), "delete key1");
@@ -146,14 +154,16 @@ foreach my $subtest (keys %other_modules) {
 
         # stick in a value that is highly compressable
         ok($memd->set("key1", "".("A" x (1024*512)) ), "[$subtest] set key1 to 512k of repeated 'A'");
-        is($memd->get("key1"), "".("A" x (1024*512)),  "[$subtest] get key1 is same string");
+        #is($memd->get("key1"), "".("A" x (1024*512)),  "[$subtest] get key1 is same string");
+        ok($memd->get("key1") eq "".("A" x (1024*512)),  "[$subtest] get key1 is same string");
 
         # make a big random string
         my $rand;
         $rand .= chr(rand(255)) for 1 .. (1024*256);
 
         ok($memd->set("key2", $rand), "[$subtest] set key2 to 512k of repeated 'A'");
-        is($memd->get("key2"), $rand, "[$subtest] get key2 is same string");
+        #is($memd->get("key2"), $rand, "[$subtest] get key2 is same string");
+        ok($memd->get("key2") eq $rand, "[$subtest] get key2 is same string");
 
         # make a new instance that lets us peek at the uncompresed value
         my $memd2 = Cache::Memcached->new({
@@ -170,7 +180,8 @@ foreach my $subtest (keys %other_modules) {
         $memd2->enable_compress(0);
 
         ok($memd2->get("key1"),  "[$subtest] get compressed key1 got something");
-        isnt($memd2->get("key1"), "".("A" x (1024*512)),  "[$subtest] get compressed key1 is different string");
+        #isnt($memd2->get("key1"), "".("A" x (1024*512)),  "[$subtest] get compressed key1 is different string");
+        ok($memd2->get("key1") ne "".("A" x (1024*512)),  "[$subtest] get compressed key1 is different string");
         cmp_ok( length($memd2->get("key1")), '<', (1024*512),  "[$subtest] get compressed key1 is smaller than original");
 
         # clean up after ourselves

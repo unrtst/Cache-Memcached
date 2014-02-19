@@ -13,6 +13,14 @@
     * Add benchmark to gauge possibility of adding caching to digest key generation.
         script/benchmark_digest_keys_caching.pl
 
+    * Fix size of test errors. Test using large values were testing results of get()
+      with is(), which is normal, but if there was an error then a very large amount
+      of data would dump to the screen. Changed to using ok() for those.
+        t/08_compression.t
+        t/10_compress_methods.t
+        t/13_max_size.t
+        t/14_compress_ratio.t
+
 2014-02-19: version 1.32
 
     * Add many features currently found in Cache::Memcached::Fast:

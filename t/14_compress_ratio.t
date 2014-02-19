@@ -48,12 +48,14 @@ $rand .= chr(rand(255)) for 1 .. (1024*256);
 
 # make sure easily compressable stuff compresses
 ok($memd->set("key1", ("x" x (1024*512))), "set key1 to a large value");
-is($memd->get("key1"), ("x" x (1024*512)), "get key1 is correct");
+#is($memd->get("key1"), ("x" x (1024*512)), "get key1 is correct");
+ok($memd->get("key1") eq ("x" x (1024*512)), "get key1 is correct");
 cmp_ok( length($mem2->get("key1")), '<', (1024*512), "confirm key1 value got compressed");
 
 # make sure random data does not compress
 ok($memd->set("key2", $rand), "set key2 to large random value");
-is($memd->get("key2"), $rand, "get key2 is correct");
+#is($memd->get("key2"), $rand, "get key2 is correct");
+ok($memd->get("key2") eq $rand, "get key2 is correct");
 cmp_ok( length($mem2->get("key2")), '==', (1024*256), "confirm key2 value was not compressed");
 
 
@@ -61,7 +63,8 @@ cmp_ok( length($mem2->get("key2")), '==', (1024*256), "confirm key2 value was no
 # 0 * length(orig_val) == 0... and compressed size can't be smaller than that!
 $memd->set_compress_ratio(0);
 ok($memd->set("key3", ("x" x (1024*512))), "set key3 to a large value");
-is($memd->get("key3"), ("x" x (1024*512)), "get key3 is correct");
+#is($memd->get("key3"), ("x" x (1024*512)), "get key3 is correct");
+ok($memd->get("key3") eq ("x" x (1024*512)), "get key3 is correct");
 cmp_ok( length($mem2->get("key3")), '==', (1024*512), "confirm key3 value was not compressed");
 
 

@@ -29,16 +29,22 @@ my $memd = Cache::Memcached->new({
 $memd->enable_compress(1);
 
 
+#XXX: NOTE: large keys that could be checked with "is()" are being
+#     checked with "ok" because, if there is an error, "is()"
+#     would dump out an obscene amount of data to the screen.
+
 # stick in a value that is highly compressable
 ok($memd->set("key1", "".("A" x (1024*512)) ), "set key1 to 512k of repeated 'A'");
-is($memd->get("key1"), "".("A" x (1024*512)),  "get key1 is same string");
+#is($memd->get("key1"), "".("A" x (1024*512)),  "get key1 is same string");
+ok($memd->get("key1") eq "".("A" x (1024*512)),  "get key1 is same string");
 
 # make a big random string
 my $rand;
 $rand .= chr(rand(255)) for 1 .. (1024*256);
 
 ok($memd->set("key2", $rand), "set key2 to 512k of repeated 'A'");
-is($memd->get("key2"), $rand, "get key2 is same string");
+#is($memd->get("key2"), $rand, "get key2 is same string");
+ok($memd->get("key2") eq $rand, "get key2 is same string");
 
 SKIP: {
     skip "test requires Cache::Memcached version 1.31 or higher.", 2
@@ -57,7 +63,8 @@ SKIP: {
     });
     $memd->enable_compress(0);
 
-    isnt($memd2->get("key1"), "".("A" x (1024*512)),  "get compressed key1 is different string");
+    #isnt($memd2->get("key1"), "".("A" x (1024*512)),  "get compressed key1 is different string");
+    ok($memd2->get("key1") ne "".("A" x (1024*512)),  "get compressed key1 is different string");
     cmp_ok( length($memd2->get("key1")), '<', (1024*512),  "get compressed key1 is smaller than original");
 };
 

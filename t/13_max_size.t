@@ -37,10 +37,16 @@ is($memd->get("key1"), "val1", "get key1 is val1");
 ok( ! $memd->set("key2", ("x" x (1024*512))), "set key2 to a large value");
 ok( ! $memd->get("key2"), "get key2 properly failed");
 
+
+#XXX: NOTE: large keys that could be checked with "is()" are being
+#     checked with "ok" because, if there is an error, "is()"
+#     would dump out an obscene amount of data to the screen.
+
 # see if we can modify that behavior
 $memd->set_max_size(0);
 ok($memd->set("key3", ("x" x (1024*512))), "set key3 to a large value");
-is($memd->get("key3"), ("x" x (1024*512)), "get key3 is correct");
+#is($memd->get("key3"), ("x" x (1024*512)), "get key3 is correct");
+ok($memd->get("key3") eq ("x" x (1024*512)), "get key3 is correct");
 
 # clean up after ourselves
 ok($memd->delete("key1"), "delete key1");
