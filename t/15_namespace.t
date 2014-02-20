@@ -81,9 +81,9 @@ ok(! $mem2->get("key1"), "[mem2] get key1 properly failed");
 
 
 SKIP: {
-  skip "Could not parse server version; version.pm 0.77 required", 8
+  skip "Could not parse server version; version.pm 0.77 required", 17
       unless $memcached_version;
-  skip "Only using prepend/append on memcached >= 1.2.4, you have $memcached_version", 8
+  skip "Only using prepend/append on memcached >= 1.2.4, you have $memcached_version", 17
       unless $memcached_version && $memcached_version >= v1.2.4;
 
   ok(! $mem1->append("key-noexist", "bogus"), "[mem1] append key-noexist properly failed");
