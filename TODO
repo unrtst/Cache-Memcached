@@ -12,5 +12,10 @@ Add *_multi wrappers:
 See Cache::Memcached::Fast for expected API.
 
 
+Updated Cache::Memcached::GetParserXS to support utf8 keys.
+
 Updated Cache::Memcached::GetParserXS to support values returned by "gets"
-operations.
+operations. NOTE: unofficial patch is available at:
+https://github.com/unrtst/memcached/tree/master/trunk/api/xs/Cache-Memcached-GetParserXS
+
+

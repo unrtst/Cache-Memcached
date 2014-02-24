@@ -4,7 +4,11 @@
         NOTE - GetParser.pm was updated to support values returned by "gets"
         operations. The external XS library, Cache::Memcached::GetParserXS, is
         does not support these values at this time (if you are using it, everything
-        except for gets and gets_multi will continue to work).
+        except for gets and gets_multi will continue to work). It also does not
+        support utf8 keys, and its docs say its actually slower than the pure
+        perl version, so your better off not using it anyway. A patched version
+        is available that does support the cas "gets" operations at:
+        https://github.com/unrtst/memcached/tree/master/trunk/api/xs/Cache-Memcached-GetParserXS
 
 2014-02-19: version 1.33
 

@@ -1660,8 +1660,12 @@ may conveniently pass it back to L</cas> with I<@$res>:
       $memd->cas($key, @$cas_val);
   }
 
-B<NOTE:> L<Cache::Memcached::GetParserXS> is incompatible with "gets"
-cas operations.
+B<NOTE:> L<Cache::Memcached::GetParserXS> from CPAN is currently 
+incompatible with "gets" cas operations (it doesn't support utf8
+keys either). For a version that supports the cas operations,
+see:
+
+    https://github.com/unrtst/memcached/tree/master/trunk/api/xs/Cache-Memcached-GetParserXS
 
 B<gets> command first appeared in B<memcached> 1.2.4.
 
@@ -1675,8 +1679,12 @@ I<@keys> should be an array of scalars.
 I<Return:> reference to hash, where I<$href-E<gt>{$key}> holds a
 reference to an array I<[$cas, $value]>.  Compare with L</gets>.
 
-B<NOTE:> L<Cache::Memcached::GetParserXS> is incompatible with "gets"
-cas operations.
+B<NOTE:> L<Cache::Memcached::GetParserXS> from CPAN is currently 
+incompatible with "gets" cas operations (it doesn't support utf8
+keys either). For a version that supports the cas operations,
+see:
+
+    https://github.com/unrtst/memcached/tree/master/trunk/api/xs/Cache-Memcached-GetParserXS
 
 B<gets> command first appeared in B<memcached> 1.2.4.
 
