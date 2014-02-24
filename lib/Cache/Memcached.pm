@@ -607,6 +607,34 @@ sub _write_and_read {
     return $ret;
 }
 
+sub touch {
+    my Cache::Memcached $self = shift;
+    my ($key, $time) = @_;
+    return 0 if ! $self->{'active'} || $self->{'readonly'};
+    my $stime = Time::HiRes::time() if $self->{'stat_callback'};
+    my $sock = $self->get_sock($key);
+    return 0 unless $sock;
+
+    $self->{'stats'}->{"touch"}++;
+    $key = ref $key ? $key->[1] : $key;
+    $key = $self->{'digest_keys_method'}->( $key ) if $self->{'digest_keys_enable'};
+    $time = $time ? " $time" : "";
+
+    # key reconstituted from server won't have utf8 on, so turn it off on input
+    # scalar to allow hash lookup to succeed
+    Encode::_utf8_off($key) if Encode::is_utf8($key);
+
+    my $cmd = "touch $self->{namespace}$key$time\r\n";
+    my $res = _write_and_read($self, $sock, $cmd);
+
+    if ($self->{'stat_callback'}) {
+        my $etime = Time::HiRes::time();
+        $self->{'stat_callback'}->($stime, $etime, $sock, 'touch');
+    }
+
+    return defined $res && $res eq "TOUCHED\r\n";
+}
+
 sub delete {
     my Cache::Memcached $self = shift;
     my ($key, $time) = @_;
@@ -656,10 +684,16 @@ sub prepend {
     _set("prepend", @_);
 }
 
+sub cas {
+    _set("cas", @_);
+}
+
 sub _set {
     my $cmdname = shift;
     my Cache::Memcached $self = shift;
-    my ($key, $val, $exptime) = @_;
+    my $key = shift;
+    my $cas = ($cmdname eq 'cas') ? shift(@_) : undef;
+    my ($val, $exptime) = @_;
     return 0 if ! $self->{'active'} || $self->{'readonly'};
     my $stime = Time::HiRes::time() if $self->{'stat_callback'};
     my $sock = $self->get_sock($key);
@@ -715,7 +749,9 @@ sub _set {
     $exptime = int($exptime || 0);
 
     local $SIG{'PIPE'} = "IGNORE" unless $FLAG_NOSIGNAL;
-    my $line = "$cmdname $self->{namespace}$key $flags $exptime $len\r\n$val\r\n";
+    my $line = ($cmdname eq 'cas')
+             ? "$cmdname $self->{namespace}$key $flags $exptime $len $cas\r\n$val\r\n"
+             : "$cmdname $self->{namespace}$key $flags $exptime $len\r\n$val\r\n";
 
     my $res = _write_and_read($self, $sock, $line);
 
@@ -765,12 +801,21 @@ sub _incrdecr {
     return $1;
 }
 
+sub gets {
+    _get('gets', @_);
+}
+
 sub get {
-    my Cache::Memcached $self = $_[0];
-    my $key = $_[1];
+    _get('get', @_);
+}
+
+sub _get {
+    my $cmdname = shift;
+    my Cache::Memcached $self = shift;
+    my $key = shift;
 
     # TODO: make a fast path for this?  or just keep using get_multi?
-    my $r = $self->get_multi($key);
+    my $r = _get_multi($cmdname, $self, $key);
     my $kval = ref $key ? $key->[1] : $key;
 
     # key reconstituted from server won't have utf8 on, so turn it off on input
@@ -781,6 +826,15 @@ sub get {
 }
 
 sub get_multi {
+    _get_multi('get', @_);
+}
+
+sub gets_multi {
+    _get_multi('gets', @_);
+}
+
+sub _get_multi {
+    my $cmdname = shift;
     my Cache::Memcached $self = shift;
     return {} unless $self->{'active'};
     $self->{'_stime'} = Time::HiRes::time() if $self->{'stat_callback'};
@@ -852,7 +906,7 @@ sub get_multi {
 
     local $SIG{'PIPE'} = "IGNORE" unless $FLAG_NOSIGNAL;
 
-    _load_multi($self, \%sock_keys, \%val);
+    _load_multi($cmdname, $self, \%sock_keys, \%val);
 
     # map the hashed keys back to user provided key values
     if ($self->{'digest_keys_enable'}) {
@@ -863,7 +917,8 @@ sub get_multi {
 
     if ($self->{'debug'}) {
         while (my ($k, $v) = each %val) {
-            print STDERR "MemCache: got $k = $v\n";
+            my $casval = ref($v) ? "(cas:$v->[0]) $v->[1]" : $v;
+            print STDERR "MemCache: got $k = $casval\n";
         }
     }
     return \%val;
@@ -871,6 +926,7 @@ sub get_multi {
 
 sub _load_multi {
     use bytes; # return bytes from length()
+    my $cmdname = shift;
     my Cache::Memcached $self;
     my ($sock_keys, $ret);
 
@@ -912,6 +968,11 @@ sub _load_multi {
         $map = {@_} unless ref $map;
 
         while (my ($k, $flags) = each %$map) {
+            # if cas is returned, $flags is an arrayref
+            my $cas;
+            if (ref $flags) {
+                ($cas, $flags) = @$flags;
+            }
 
             # remove trailing \r\n
             chop $ret->{$k}; chop $ret->{$k};
@@ -944,6 +1005,8 @@ sub _load_multi {
                     delete $ret->{$k};
                 }
             }
+            # add cas value to result if we got it
+            $ret->{$k} = [ $cas, $ret->{$k} ] if defined $cas;
         }
     };
 
@@ -953,9 +1016,9 @@ sub _load_multi {
         print STDERR "processing socket $_\n" if $self->{'debug'} >= 2;
         $writing{$_} = $sock;
         if ($self->{namespace}) {
-            $buf{$_} = join(" ", 'get', (map { "$self->{namespace}$_" } @{$sock_keys->{$_}}), "\r\n");
+            $buf{$_} = join(" ", $cmdname, (map { "$self->{namespace}$_" } @{$sock_keys->{$_}}), "\r\n");
         } else {
-            $buf{$_} = join(" ", 'get', @{$sock_keys->{$_}}, "\r\n");
+            $buf{$_} = join(" ", $cmdname, @{$sock_keys->{$_}}, "\r\n");
         }
 
         $parser{$_} = $self->{parser_class}->new($ret, $self->{namespace_len}, $finalize);
@@ -1083,6 +1146,31 @@ sub run_command {
     }
     chop $ret; chop $ret;
     return map { "$_\r\n" } split(/\r\n/, $ret);
+}
+
+sub server_versions {
+    my Cache::Memcached $self = shift;
+
+    my %ret;
+
+    my @hosts = @{$self->{'buckets'}};
+    foreach my $host (@hosts) {
+        my $sock = $self->sock_to_host($host);
+        next unless $sock;
+        my $ver;
+        my $line = "version\r\n";
+        while (my $res = _write_and_read($self, $sock, $line)) {
+            undef $line;
+            $ver .= $res;
+            last if $ver =~ /(?:VERSION \S*|END|ERROR)\r\n$/;
+        }
+        if (index($ver, 'VERSION ') == 0) {
+            chop($ver); chop($ver);
+            $ret{$host} = substr($ver, 8);
+        }
+    }
+
+    return \%ret;
 }
 
 sub stats {
@@ -1224,10 +1312,30 @@ Cache::Memcached - client library for memcached (memory cache daemon)
   $val = $memd->get("my_key");
   $val = $memd->get("object_key");
   if ($val) { print $val->{'complex'}->[2]; }
+  $href = $memd->get_multi("my_key", "object_key");
 
   $memd->incr("key");
   $memd->decr("key");
   $memd->incr("key", 2);
+
+  $memd->replace("my_key", "bar");
+  $memd->prepend("my_key", "foo ");
+  $memd->append("my_key", " baz");
+  # my_key = "foo bar baz"
+
+  # Do atomic check-and-set operations
+  my $cas_val = $memd->gets("my_key");
+  $$cas_val[1] = "new val" if $$cas_val[1] eq "foo bar baz";
+  if ($memd->cas("my_key", @$cas_val)) {
+      # ok, value updated
+  } else {
+      # updated failed. Another client probably has the value";
+  }
+
+  $memd->touch("my_key", 60); # change expiration to 60 seconds
+
+  $memd->delete("my_key");
+  $memd->flush_all();
 
 =head1 DESCRIPTION
 
@@ -1535,6 +1643,43 @@ of total packets flying around your network, reducing total latency,
 since your app doesn't have to wait for each round-trip of 'get'
 before sending the next one.
 
+=item C<gets>
+
+  $memd->gets($key);
+
+Retrieve the value and its CAS for a I<$key>.  I<$key> should be a
+scalar.
+
+I<Return:> reference to an array I<[$cas, $value]>, or nothing.  You
+may conveniently pass it back to L</cas> with I<@$res>:
+
+  my $cas_val = $memd->gets($key);
+  # Update value.
+  if (defined $cas_val) {
+      $$cas_val[1] = 3;
+      $memd->cas($key, @$cas_val);
+  }
+
+B<NOTE:> L<Cache::Memcached::GetParserXS> is incompatible with "gets"
+cas operations.
+
+B<gets> command first appeared in B<memcached> 1.2.4.
+
+=item C<gets_multi>
+
+  $memd->gets_multi(@keys);
+
+Retrieve several values and their CASs associated with I<@keys>.
+I<@keys> should be an array of scalars.
+
+I<Return:> reference to hash, where I<$href-E<gt>{$key}> holds a
+reference to an array I<[$cas, $value]>.  Compare with L</gets>.
+
+B<NOTE:> L<Cache::Memcached::GetParserXS> is incompatible with "gets"
+cas operations.
+
+B<gets> command first appeared in B<memcached> 1.2.4.
+
 =item C<set>
 
 $memd->set($key, $value[, $exptime]);
@@ -1549,6 +1694,26 @@ The $exptime (expiration time) defaults to "never" if unspecified.  If
 you want the key to expire in memcached, pass an integer $exptime.  If
 value is less than 60*60*24*30 (30 days), time is assumed to be relative
 from the present.  If larger, it's considered an absolute Unix time.
+
+=item C<cas>
+
+$memd->cas($key, $cas, $value[, $exptime]):
+
+Store the I<$value> on the server under the I<$key>, but only if CAS
+(I<Consistent Access Storage>) value associated with this key is equal
+to I<$cas>.  I<$cas> is an opaque object returned with L</gets> or
+L</gets_multi>.
+
+See L</set> for I<$key>, I<$value>, I<$exptime> parameters
+description.
+
+I<Return:> boolean, true for positive server reply, false for negative
+server reply, or I<undef> in case of some error.  Thus if the key
+exists on the server, false would mean that some other client has
+updated the value, and L</gets>, L</cas> command sequence should be
+repeated.
+
+B<cas> command first appeared in B<memcached> 1.2.4.
 
 =item C<add>
 
@@ -1592,6 +1757,27 @@ $memd->decr($key[, $value]);
 Like incr, but decrements.  Unlike incr, underflow is checked and new
 values are capped at 0.  If server value is 1, a decrement of 2
 returns 0, not -1.
+
+=item C<touch>
+
+$memd->touch($key, $exptime);
+
+The "touch" command is used to update the expiration time of an existing item
+without fetching it.
+
+See L</set> for I<$key>, and I<$exptime> parameters
+
+B<touch> command first appeared in B<memcached> 1.4.8.
+
+=item C<server_versions>
+
+$memd->server_versions;
+
+Get server versions.
+
+I<Return:> reference to hash, where I<$href-E<gt>{$server}> holds
+corresponding server version.  I<$server> is either I<host:port> or
+F</path/to/unix.sock>, as described in L</servers>.
 
 =item C<stats>
 

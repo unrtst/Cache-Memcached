@@ -1,4 +1,13 @@
+2014-02-23: version 1.34
+
+    * Add support for cas/gets/gets_multi/touch/server_versions.
+        NOTE - GetParser.pm was updated to support values returned by "gets"
+        operations. The external XS library, Cache::Memcached::GetParserXS, is
+        does not support these values at this time (if you are using it, everything
+        except for gets and gets_multi will continue to work).
+
 2014-02-19: version 1.33
+
     * Add digest_keys_enable/digest_keys_method support.
         If enabled, all memcached keys are hashed (ex. Digest::MD5::md5_base64)
         before being sent to the memcached server, and mapped back to user supplied

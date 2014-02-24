@@ -1,3 +1,16 @@
-(currently empty)
+Add *_multi wrappers:
+    add_multi
+    replace_multi
+    set_multi
+    prepend_multi
+    append_multi
+    incr_multi
+    decr_multi
+    cas_multi
+    delete_multi
+    touch_multi
+See Cache::Memcached::Fast for expected API.
 
 
+Updated Cache::Memcached::GetParserXS to support values returned by "gets"
+operations.

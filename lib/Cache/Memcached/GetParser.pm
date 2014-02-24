@@ -13,6 +13,16 @@ use constant STATE   => 4;  # 0 = waiting for a line, N = reading N bytes
 use constant OFFSET  => 5;  # offsets to read into buffers
 use constant FLAGS   => 6;
 use constant KEY     => 7;  # current key we're parsing (without the namespace prefix)
+use constant CAS     => 8;  # the 64bit cas number, if returned.
+
+# XXX: benchmarked the following for the value regex:
+#       qr/^VALUE (\S+) (\d+) (\d+) ?(\d+)?\r\n/;
+#       qr/^VALUE (\S+) (\d+) (\d+)(?: (\d+))?\r\n/;
+#       qr/^VALUE (\S+) (\d+) (\d+)(?: (\d+)\r\n|\r\n)/;    # WINNER
+#       qr/^VALUE (\S+) (\d+) (\d+)(?: (\d+)|)\r\n/;
+#       qr/^VALUE (\S+) (\d+) (\d+)\r\n/ || qr/^VALUE (\S+) (\d+) (\d+) (\d+)\r\n/;
+my $REGEX_VALUE = qr/^VALUE (\S+) (\d+) (\d+)(?: (\d+)\r\n|\r\n)/;
+my $REGEX_END   = qr/^END\r\n/;
 
 sub new {
     my ($class, $dest, $nslen, $on_item) = @_;
@@ -45,7 +55,11 @@ sub parse_from_sock {
 
         $self->[OFFSET] += $res;
         if ($self->[OFFSET] == $self->[STATE]) { # finished reading
-            $self->[ON_ITEM]->($self->[KEY], $self->[FLAGS]);
+            if (defined $self->[CAS]) {
+                $self->[ON_ITEM]->($self->[KEY], [$self->[CAS], $self->[FLAGS]]);
+            } else {
+                $self->[ON_ITEM]->($self->[KEY], $self->[FLAGS]);
+            }
             $self->[OFFSET] = 0;
             $self->[STATE]  = 0;
             # wait for another VALUE line or END...
@@ -78,15 +92,15 @@ sub parse_buffer {
     while (1) { # may have to search many times
 
         # do we have a complete END line?
-        if ($self->[BUF] =~ /^END\r\n/) {
+        if ($self->[BUF] =~ /$REGEX_END/) {
             $self->[ON_ITEM] = undef;
             return 1;  # we're done successfully, return 1 to finish
         }
 
         # do we have a complete VALUE line?
-        if ($self->[BUF] =~ /^VALUE (\S+) (\d+) (\d+)\r\n/) {
-            ($self->[KEY], $self->[FLAGS], $self->[STATE]) =
-                (substr($1, $self->[NSLEN]), int($2), $3+2);
+        if ($self->[BUF] =~ /$REGEX_VALUE/) {
+            ($self->[KEY], $self->[FLAGS], $self->[STATE], $self->[CAS]) =
+                (substr($1, $self->[NSLEN]), int($2), $3+2, $4);
             # Note: we use $+[0] and not pos($self->[BUF]) because pos()
             # seems to have problems under perl's taint mode.  nobody
             # on the list discovered why, but this seems a reasonable
@@ -100,7 +114,11 @@ sub parse_buffer {
             substr($self->[BUF], 0, $p+$copy, ''); # delete the stuff we used
 
             if ($self->[OFFSET] == $self->[STATE]) { # have it all?
-                $self->[ON_ITEM]->($self->[KEY], $self->[FLAGS]);
+                if (defined $self->[CAS]) {
+                    $self->[ON_ITEM]->($self->[KEY], [$self->[CAS], $self->[FLAGS]]);
+                } else {
+                    $self->[ON_ITEM]->($self->[KEY], $self->[FLAGS]);
+                }
                 $self->[OFFSET] = 0;
                 $self->[STATE]  = 0;
                 next SEARCH; # look again
