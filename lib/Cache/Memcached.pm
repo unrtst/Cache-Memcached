@@ -45,7 +45,7 @@ use constant DEFAULT_COMPRESS_RATIO => 0.80; # percent
 use constant DEFAULT_MAX_SIZE => 0; # bytes
 
 use vars qw($VERSION $HAVE_ZLIB $FLAG_NOSIGNAL $HAVE_SOCKET6);
-$VERSION = "1.33";
+$VERSION = "1.34";
 
 BEGIN {
     $HAVE_ZLIB = eval "use Compress::Zlib (); 1;";
