@@ -1,3 +1,7 @@
+    * Added "digest_keys_threshold" feature, so keys only get digested
+        if length of key is bigger than the threshold. Default is to digest
+        all keys if "digest_keys_enabled" is on. This may be set to "250"
+        to only digest keys that would be rejected by memcached.
 
     * Fix more utf8 bugs. get_multi, incr, and decr did not support it,
         probably because they weren't tested. Added tests, then fixed support.

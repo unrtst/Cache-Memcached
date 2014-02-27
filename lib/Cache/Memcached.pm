@@ -31,7 +31,7 @@ use fields qw{
     compress_ratio     max_size
     hash_namespace     prefix_hash
     compress_methods   serialize_methods
-    digest_keys_enable digest_keys_method
+    digest_keys_enable digest_keys_method   digest_keys_threshold _ns_dk_thresh
 };
 
 # flag definitions
@@ -44,6 +44,8 @@ use constant DEFAULT_COMPRESS_RATIO => 0.80; # percent
 # NOTE: Cache::Memcached::Fast uses a default of 1024*1024 (1mb).
 #       Cache::Memcached disables this by default for backward compatibilty.
 use constant DEFAULT_MAX_SIZE => 0; # bytes
+
+use constant DEFAULT_DIGEST_KEYS_THRESHOLD => 0; # bytes
 
 use vars qw($VERSION $HAVE_ZLIB $FLAG_NOSIGNAL $HAVE_SOCKET6);
 $VERSION = "1.34";
@@ -137,6 +139,10 @@ sub new {
         $self->{'digest_keys_enable'} = 0;
         $self->{'digest_keys_method'} = undef;
     }
+    # digest_keys_threshold : if length(key) >= this, and digest_keys is enabled,
+    # then digest_keys_method is applied. Default is 0, digest everything.
+    $self->{'digest_keys_threshold'}  = $args->{'digest_keys_threshold'}
+                                      || DEFAULT_DIGEST_KEYS_THRESHOLD;
 
     # TODO: undocumented
     $self->{'connect_timeout'} = $args->{'connect_timeout'} || 0.25;
@@ -150,6 +156,10 @@ sub new {
     } else {
         $self->{'prefix_hash'} = 0; # behave as if it isn't there
     }
+
+    # set the real digest_keys_threshold used internally, subtracting namespace_len
+    $self->{'_ns_dk_thresh'} = $self->{'digest_keys_threshold'} - $self->{'namespace_len'};
+    $self->{'_ns_dk_thresh'} = 0 if $self->{'_ns_dk_thresh'} < 0;
 
     return $self;
 }
@@ -271,6 +281,15 @@ sub set_digest_keys_method {
         $self->digest_keys_enable(0);
         $self->{'digest_keys_method'} = undef
     }
+}
+
+sub set_digest_keys_threshold {
+    my Cache::Memcached $self = shift;
+    my ($length) = @_;
+    # set the real digest_keys_threshold used internally, subtracting namespace_len
+    $self->{'_ns_dk_thresh'} = $length - $self->{'namespace_len'};
+    $self->{'_ns_dk_thresh'} = 0 if $self->{'_ns_dk_thresh'} < 0;
+    $self->{'digest_keys_threshold'} = $length;
 }
 
 sub set_compress_methods {
@@ -496,7 +515,8 @@ sub get_sock { # (key)
     return undef unless $self->{'active'};
 
     my $real_key = ref $key ? $key->[1] : $key;
-    $real_key = $self->{'digest_keys_method'}->( $real_key ) if $self->{'digest_keys_enable'};
+    $real_key = $self->{'digest_keys_method'}->( $real_key )
+        if ($self->{'digest_keys_enable'} && bytes::length($real_key) >= $self->{'_ns_dk_thresh'});
     my $hv = ref $key ? int($key->[0]) : _hashfunc($real_key, $self->{'prefix_hash'});
 
     my $tries = 0;
@@ -618,7 +638,8 @@ sub touch {
 
     $self->{'stats'}->{"touch"}++;
     $key = ref $key ? $key->[1] : $key;
-    $key = $self->{'digest_keys_method'}->( $key ) if $self->{'digest_keys_enable'};
+    $key = $self->{'digest_keys_method'}->( $key )
+        if ($self->{'digest_keys_enable'} && bytes::length($key) >= $self->{'_ns_dk_thresh'});
     $time = $time ? " $time" : "";
 
     # turn off utf8 when sending keys
@@ -645,7 +666,8 @@ sub delete {
 
     $self->{'stats'}->{"delete"}++;
     $key = ref $key ? $key->[1] : $key;
-    $key = $self->{'digest_keys_method'}->( $key ) if $self->{'digest_keys_enable'};
+    $key = $self->{'digest_keys_method'}->( $key )
+        if ($self->{'digest_keys_enable'} && bytes::length($key) >= $self->{'_ns_dk_thresh'});
     $time = $time ? " $time" : "";
 
     # turn off utf8 when sending keys
@@ -702,7 +724,8 @@ sub _set {
     $self->{'stats'}->{$cmdname}++;
     my $flags = 0;
     my $real_key = $key = ref $key ? $key->[1] : $key;
-    $key = $self->{'digest_keys_method'}->( $key ) if $self->{'digest_keys_enable'};
+    $key = $self->{'digest_keys_method'}->( $key )
+        if ($self->{'digest_keys_enable'} && bytes::length($key) >= $self->{'_ns_dk_thresh'});
 
     if (ref $val) {
         die "append or prepend cannot take a reference" if $app_or_prep;
@@ -785,7 +808,9 @@ sub _incrdecr {
     my $sock = $self->get_sock($key);
     return undef unless $sock;
     $key = $key->[1] if ref $key;
-    $key = $self->{'digest_keys_method'}->( $key ) if $self->{'digest_keys_enable'};
+    $key = $self->{'digest_keys_method'}->( $key )
+        if ($self->{'digest_keys_enable'} && bytes::length($key) >= $self->{'_ns_dk_thresh'});
+
     $self->{'stats'}->{$cmdname}++;
     $value = 1 unless defined $value;
 
@@ -848,7 +873,12 @@ sub _get_multi {
     my %hash_to_key_map;
     my %key_to_hash_map;
     if ($self->{'digest_keys_enable'}) {
-        %hash_to_key_map = map { $self->{'digest_keys_method'}->( $_ ) => $_ } @_;
+        %hash_to_key_map = map { 
+            (   (bytes::length($_) >= $self->{'_ns_dk_thresh'})
+                ? $self->{'digest_keys_method'}->( $_ )
+                : $_
+            ) => $_
+            } @_;
         %key_to_hash_map = map { $hash_to_key_map{$_} => $_ } keys %hash_to_key_map;
     }
 
@@ -859,7 +889,9 @@ sub _get_multi {
         }
         foreach my $key (@_) {
             my $kval = ref $key ? $key->[1] : $key;
-            $kval = $key_to_hash_map{ $kval } if $self->{'digest_keys_enable'};
+            $kval = $key_to_hash_map{ $kval }
+                if ($self->{'digest_keys_enable'}
+                    && bytes::length($key) >= $self->{'_ns_dk_thresh'});
             push @{$sock_keys{$sock}}, $kval;
         }
     } else {
@@ -874,7 +906,9 @@ sub _get_multi {
       KEY:
         foreach my $key (@_) {
             my $real_key = ref $key ? $key->[1] : $key;
-            $real_key = $key_to_hash_map{ $real_key } if $self->{'digest_keys_enable'};
+            $real_key = $key_to_hash_map{ $real_key }
+                if ($self->{'digest_keys_enable'}
+                    && bytes::length($real_key) >= $self->{'_ns_dk_thresh'});
             my $hv = ref $key ? int($key->[0]) : _hashfunc($real_key, $self->{'prefix_hash'});
 
             my $tries;
@@ -1298,20 +1332,21 @@ Cache::Memcached - client library for memcached (memory cache daemon)
   $memd = new Cache::Memcached {
     'servers' => [ "10.0.0.15:11211", "10.0.0.15:11212", "/var/sock/memcached",
                    "10.0.0.17:11211", [ "10.0.0.17:11211", 3 ] ],
-    'debug'              => 0,
-    'namespace'          => '',
-    'hash_namespace'     => 0,
-    'connect_timeout'    => 0.25,
-    'select_timeout'     => 1,
-    'compress_enable'    => 1,
-    'compress_threshold' => 10_000,
-    'compress_ratio'     => 0.8,
-    'compress_methods'   => [ sub { ${$_[1]} = Compress::Zlib::memGzip(${$_[0]})   },
-                              sub { ${$_[1]} = Compress::Zlib::memGunzip(${$_[0]}) }, ],
-    'serialize_methods'  => [ \&Storable::nfreeze, \&Storable::thaw ],
-    'digest_keys_enable' => 0,
-    'digest_keys_method' => sub { Digest::MD5::md5_base64( $_ ) },
-    'max_size'           => 0,
+    'debug'                 => 0,
+    'namespace'             => '',
+    'hash_namespace'        => 0,
+    'connect_timeout'       => 0.25,
+    'select_timeout'        => 1,
+    'compress_enable'       => 1,
+    'compress_threshold'    => 10_000,
+    'compress_ratio'        => 0.8,
+    'compress_methods'      => [ sub { ${$_[1]} = Compress::Zlib::memGzip(${$_[0]})   },
+                                 sub   { ${$_[1]} = Compress::Zlib::memGunzip(${$_[0]}) }, ],
+    'serialize_methods'     => [ \&Storable::nfreeze, \&Storable::thaw ],
+    'digest_keys_enable'    => 0,
+    'digest_keys_threshold' => > 0,
+    'digest_keys_method'    => sub { Digest::MD5::md5_base64( $_ ) },
+    'max_size'              => 0,
   };
   $memd->set_servers($array_ref);
   $memd->set_compress_threshold(10_000);
@@ -1414,6 +1449,10 @@ Use C<digest_keys_enable> to transparently use a one way hash
 (ex. Digest::MD5::md5_base64) for the key stored on the memcached servers.
 See L</digest_keys_enable> for more information.
 
+Use C<digest_keys_threshold> to only digest keys that are equal
+or greater in length than this value.
+See L</set_digest_keys_threshold> for more information.
+
 Use C<digest_keys_method> to set the method used to internally hash
 keys. See L</set_digest_keys_method> for more information.
 
@@ -1486,6 +1525,28 @@ hurt network or memcached server performance. L<Digest::MD5> is quite
 fast, so its use has very little impact on performance.
 
 This method can be used to temporarily enable/disable this feature.
+
+=item C<digest_keys_threshold>
+
+Sets the threshold before keys are digested.
+
+When set (and L</digest_keys_enable>), keys will only be run through
+the L</digest_key_method> when the key length (namespace + key) is
+greater than or equal to the L</digest_keys_threshold>.
+
+Defaults is 0, to digest all keys when digest_keys_enable is true.
+
+Set to "251" to only digest keys that would otherwise be rejected
+by memcached server. Please note, this threshold takes into account
+the C<namespace> for you. For example, if using:
+
+    namespace => "foo",
+    digest_keys_enable => 1,
+    digest_keys_threshold => 10,
+    #
+    $memd->get("bar"); # no digest, fetches "foobar"
+    $memd->get("barbaz"); # no digest, fetches "foobarbaz"
+    $memd->get("barbaz08"); # digested, fetches "foo3pzZN5qeWLo8m7uUeY9pmw"
 
 =item C<set_digest_keys_method>
 
