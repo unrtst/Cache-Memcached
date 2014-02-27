@@ -19,6 +19,7 @@ use String::CRC32;
 use Errno qw( EINPROGRESS EWOULDBLOCK EISCONN );
 use Cache::Memcached::GetParser;
 use Encode ();
+require bytes; # so we can later do "bytes::length()" without poluting things.
 use fields qw{
     debug no_rehash stats compress_threshold compress_enable stat_callback
     readonly select_timeout namespace namespace_len servers active buckets
@@ -620,8 +621,7 @@ sub touch {
     $key = $self->{'digest_keys_method'}->( $key ) if $self->{'digest_keys_enable'};
     $time = $time ? " $time" : "";
 
-    # key reconstituted from server won't have utf8 on, so turn it off on input
-    # scalar to allow hash lookup to succeed
+    # turn off utf8 when sending keys
     Encode::_utf8_off($key) if Encode::is_utf8($key);
 
     my $cmd = "touch $self->{namespace}$key$time\r\n";
@@ -648,8 +648,7 @@ sub delete {
     $key = $self->{'digest_keys_method'}->( $key ) if $self->{'digest_keys_enable'};
     $time = $time ? " $time" : "";
 
-    # key reconstituted from server won't have utf8 on, so turn it off on input
-    # scalar to allow hash lookup to succeed
+    # turn off utf8 when sending keys
     Encode::_utf8_off($key) if Encode::is_utf8($key);
 
     my $cmd = "delete $self->{namespace}$key$time\r\n";
@@ -699,8 +698,6 @@ sub _set {
     my $sock = $self->get_sock($key);
     return 0 unless $sock;
 
-    use bytes; # return bytes from length()
-
     my $app_or_prep = $cmdname eq 'append' || $cmdname eq 'prepend' ? 1 : 0;
     $self->{'stats'}->{$cmdname}++;
     my $flags = 0;
@@ -715,7 +712,7 @@ sub _set {
     }
     warn "value for memkey:$real_key is not defined" unless defined $val;
 
-    my $len = length($val);
+    my $len = bytes::length($val);
 
     if ($self->{'compress_threshold'} && $self->{'compress_enable'} &&
         $self->{'compress_methods'}   && !$app_or_prep &&
@@ -730,7 +727,7 @@ sub _set {
         if ($@) {
             print STDERR "compress_methods 0 (compress) failed: $@\n" if $self->{'debug'};
         } else {
-            my $c_len = length($c_val);
+            my $c_len = bytes::length($c_val);
             # do we want to keep it?
             if ($c_len < $len*$self->{'compress_ratio'}) {
                 $val = $c_val;
@@ -747,6 +744,9 @@ sub _set {
     }
 
     $exptime = int($exptime || 0);
+
+    # turn off utf8 when sending keys
+    Encode::_utf8_off($key) if Encode::is_utf8($key);
 
     local $SIG{'PIPE'} = "IGNORE" unless $FLAG_NOSIGNAL;
     my $line = ($cmdname eq 'cas')
@@ -789,6 +789,9 @@ sub _incrdecr {
     $self->{'stats'}->{$cmdname}++;
     $value = 1 unless defined $value;
 
+    # turn off utf8 when sending keys
+    Encode::_utf8_off($key) if Encode::is_utf8($key);
+
     my $line = "$cmdname $self->{namespace}$key $value\r\n";
     my $res = _write_and_read($self, $sock, $line);
 
@@ -817,10 +820,6 @@ sub _get {
     # TODO: make a fast path for this?  or just keep using get_multi?
     my $r = _get_multi($cmdname, $self, $key);
     my $kval = ref $key ? $key->[1] : $key;
-
-    # key reconstituted from server won't have utf8 on, so turn it off on input
-    # scalar to allow hash lookup to succeed
-    Encode::_utf8_off($kval) if Encode::is_utf8($kval);
 
     return $r->{$kval};
 }
@@ -908,6 +907,13 @@ sub _get_multi {
 
     _load_multi($cmdname, $self, \%sock_keys, \%val);
 
+    # utf8 decode keys if needed
+    foreach my $k (keys %val) {
+        unless (Encode::is_utf8($k)) {
+            $val{ Encode::decode('utf-8', $k) } = delete $val{$k};
+        }
+    }
+
     # map the hashed keys back to user provided key values
     if ($self->{'digest_keys_enable'}) {
         foreach my $k (keys %val) {
@@ -925,7 +931,6 @@ sub _get_multi {
 }
 
 sub _load_multi {
-    use bytes; # return bytes from length()
     my $cmdname = shift;
     my Cache::Memcached $self;
     my ($sock_keys, $ret);
@@ -1041,6 +1046,12 @@ sub _load_multi {
     my $write = sub {
         my ($sock, $sockstr) = ($_[0], "$_[0]");
         my $res;
+
+        # XXX: historically, this was at the start of _load_muti
+        #      so it applied here.
+        #      I do not know for certain that this it should have been enabled
+        #      for both length and substr.
+        use bytes; # return bytes from length() and substr()
 
         $res = send($sock, $buf{$sockstr}, $FLAG_NOSIGNAL);
 
