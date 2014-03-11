@@ -1923,8 +1923,8 @@ $memd->flush_all;
 Runs the memcached "flush_all" command on all configured hosts,
 emptying all their caches.  (or rather, invalidating all items
 in the caches in an O(1) operation...)  Running stats will still
-show the item existing, they're just be non-existent and lazily
-destroyed next time you try to detch any of them.
+show the item existing, they will just be non-existent and lazily
+destroyed the next time you try to fetch any of them.
 
 =back
 
