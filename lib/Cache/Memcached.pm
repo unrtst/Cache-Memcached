@@ -343,6 +343,17 @@ sub set_stat_callback {
 
 my %sock_map;  # stringified-$sock -> "$ip:$port"
 
+sub CLONE {
+    # rebuild %sock_map for new thread
+    %sock_map = ();
+    foreach (keys %cache_sock) {
+        $sock_map{$cache_sock{$_}} = $_;
+    }
+
+    # We need to globally recalculate our buck2sock in all objects, so we increment the global generation.
+    $socket_cache_generation++;
+}
+
 sub _dead_sock {
     my ($self, $sock, $ret, $dead_for) = @_;
     if (my $ipport = $sock_map{$sock}) {

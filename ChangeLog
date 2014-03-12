@@ -21,6 +21,9 @@
         some cases, ex with memcached 1.4.4), we encode to bytecode on set,
         and decode to utf-8 on get.
 
+    * Added thread support (not thoroughly tested).
+        See also RE#54515
+
 2014-02-23: version 1.34
 
     * Add support for cas/gets/gets_multi/touch/server_versions.
