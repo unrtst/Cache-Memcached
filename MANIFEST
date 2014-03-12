@@ -33,6 +33,7 @@ t/17_server_version.t
 t/18_cas.t
 t/19_touch.t
 t/20_magic.t
+t/21_threads.t
 t/test_structs.pl
 META.yml                                 Module YAML meta-data (added by MakeMaker)
 META.json                                Module JSON meta-data (added by MakeMaker)
