@@ -13,7 +13,7 @@ my $testaddr = "127.0.0.1:11211";
 my $msock = IO::Socket::INET->new(PeerAddr => $testaddr,
                                   Timeout  => 3);
 if ($msock) {
-    plan tests => 70;
+    plan tests => 75;
 } else {
     plan skip_all => "No memcached instance running at $testaddr\n";
     exit 0;
@@ -74,27 +74,19 @@ is($memd->get($key3),    "val2",    "get utf8 key is normal value");
 ok($memd->delete($scalar3),         "delete Tie::Scalar utf8 key");
 
 
-TODO: {
-    local $TODO = "utf8 values do not appear to work at this time";
+my $key4 = "4Кириллица.в.UTF-8";
+$scalar4 = $key4;
 
-    # these cause fatal failures, so we need to wrap them in eval's
-    # failures look like this:
-    #   Wide character in send at lib/Cache/Memcached.pm line 596.
+ok(eval{$memd->set("key3", $key4)},      "set key3 to utf8 value");
+ok(eval{$memd->set("key3", $scalar4)},   "set key3 to Tie::StdScalar utf8 value");
 
-    my $key4 = "4Кириллица.в.UTF-8";
-    $scalar4 = $key4;
-
-    ok(eval{$memd->set("key3", $key4)},      "set key3 to utf8 value");
-    ok(eval{$memd->set("key3", $scalar4)},   "set key3 to Tie::StdScalar utf8 value");
-
-    ok(eval{$memd->set($scalar4, $scalar4)},  "set Tie::StdScalar utf8 value to Tie::StdScalar utf8 value");
-    my $multi;
-    ok($multi = eval{$memd->get_multi($scalar4)}, "get_multi on Tie::Scalar utf8 key");
-    ok(exists $multi->{$scalar4},               "get_multi returned Tie::Scalar utf8 key");
-    ok(exists $multi->{$key4},                  "get_multi returned utf8 key");
-    is(eval{$memd->get($scalar4)}, $key4,       "get Tie::Scalar utf8 key matches utf8 value");
-    is(eval{$memd->get($key4)}, $scalar4,       "get utf8 key matches Tie::Scalar utf8 value");
-}
+ok(eval{$memd->set($scalar4, $scalar4)},  "set Tie::StdScalar utf8 value to Tie::StdScalar utf8 value");
+my $multi;
+ok($multi = eval{$memd->get_multi($scalar4)}, "get_multi on Tie::Scalar utf8 key");
+ok(exists $multi->{$scalar4},               "get_multi returned Tie::Scalar utf8 key");
+ok(exists $multi->{$key4},                  "get_multi returned utf8 key");
+is(eval{$memd->get($scalar4)}, $key4,       "get Tie::Scalar utf8 key matches utf8 value");
+is(eval{$memd->get($key4)}, $scalar4,       "get utf8 key matches Tie::Scalar utf8 value");
 
 
 package MyScalar;
@@ -103,25 +95,37 @@ use base 'Tie::StdScalar';
 sub FETCH {
     "item5"
 }
-#    "Другой.ключ"
 
 package main;
 
 tie my $scalar5, 'MyScalar';
 
-#TODO: {
-#    local $TODO = "Tie::Scalar values don't seem to work at this time";
+ok($memd->set($scalar5, $scalar5), "set MyScalar item5 to MyScalar item5");
+ok(exists $memd->get_multi($scalar5)->{$scalar5}, "get_multi MyScalar item5 includes it in result");
+is($memd->get_multi($scalar5)->{"item5"}, "item5", "get_multi MyScalar item5 is item5");
+is($memd->get($scalar5), "item5", "get MyScalar is item5");
+is($memd->get("item5"), "item5",  "get item5 is item5");
 
-    # these cause fatal failures, so we need to wrap them in eval's
-    # failures look like this:
-    #   Wide character in send at lib/Cache/Memcached.pm line 596.
 
-    ok($memd->set($scalar5, $scalar5), "set MyScalar item5 to MyScalar item5");
-    ok(exists $memd->get_multi($scalar5)->{$scalar5}, "get_multi MyScalar item5 includes it in result");
-    is($memd->get_multi($scalar5)->{"item5"}, "item5", "get_multi MyScalar item5 is item5");
-    is($memd->get($scalar5), "item5", "get MyScalar is item5");
-    is($memd->get("item5"), "item5",  "get item5 is item5");
-#}
+# again, but with utf8 data
+package MyScalar2;
+use base 'Tie::StdScalar';
+
+sub FETCH {
+    "Другой.ключ"
+}
+
+package main;
+
+my $expected6 = "Другой.ключ";
+tie my $scalar6, 'MyScalar2';
+
+ok($memd->set($scalar6, $scalar6), "set MyScalar2 utf8 data to MyScalar2 utf8 data");
+ok(exists $memd->get_multi($scalar6)->{$scalar6}, "get_multi MyScalar2 utf8 data includes it in result");
+is($memd->get_multi($scalar6)->{$expected6}, $expected6, "get_multi MyScalar2 utf8 data is utf8 data");
+is($memd->get($scalar6), $expected6, "get MyScalar2 is utf8 data");
+is($memd->get($expected6), $expected6,  "get utf8 data is utf8 data");
+
 
 SKIP: {
     eval { require Readonly };
@@ -203,45 +207,38 @@ SKIP: {
         fail("Readonly utf8 key tests");
         fail("Readonly utf8 key tests");
     }
-    TODO: {
-        # nesting a normal TODO under the skip didn't behave well.
-        # using todo_skip instead
-        # local $TODO = "utf8 values do not appear to work at this time";
-        todo_skip "utf8 values do not appear to work at this time", 7;
+    # Readonly utf8 value
+    eval q{
+        use Readonly;
 
-        # Readonly utf8 value
-        eval q{
-            use Readonly;
+        Readonly \my $val10 => "10Третий.ключ";
+        ok($memd->set("key10", $val10), "set scalar key10 to Readonly utf8 value");
+        is($memd->get("key10"), $val10, "get scalar key10 is Readonly utf8 value");
+        is($memd->get_multi("key10")->{"key10"}, $val10, "get_multi key10");
+    };
+    if ($@) {
+        fail("Readonly utf8 value tests: $@");
+        fail("Readonly utf8 value tests");
+        fail("Readonly utf8 value tests");
+    }
+    # Readonly expires, utf8 key, and utf8 value
+    eval q{
+        use Readonly;
 
-            Readonly \my $val10 => "10Третий.ключ";
-            ok($memd->set("key10", $val10), "set scalar key10 to Readonly utf8 value");
-            is($memd->get("key10"), $val10, "get scalar key10 is Readonly utf8 value");
-            is($memd->get_multi("key10")->{"key10"}, $val10, "get_multi key10");
-        };
-        if ($@) {
-            fail("Readonly utf8 value tests: $@");
-            fail("Readonly utf8 value tests");
-            fail("Readonly utf8 value tests");
-        }
-        # Readonly expires, utf8 key, and utf8 value
-        eval q{
-            use Readonly;
-
-            Readonly \my $expires => 3;
-            Readonly \my $key11 => "11Третий.ключ";
-            Readonly \my $val11 => "11Третий.ключ";
-            ok($memd->set($key11, $val11, $expires), "set Readonly utf8 key to Readonly utf8 value with Readonly expires");
-            is($memd->get($key11), $val11,           "get Readonly utf8 key is Readonly utf8 value");
-            is($memd->get_multi($key11)->{$key11}, $val11, "get_multi key 11");
-            sleep(4);
-            ok(! $memd->get($key11),                 "get Readonly utf8 key expired at correct time");
-        };
-        if ($@) {
-            fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests: $@");
-            fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests");
-            fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests");
-            fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests");
-        }
+        Readonly \my $expires => 3;
+        Readonly \my $key11 => "11Третий.ключ";
+        Readonly \my $val11 => "11Третий.ключ";
+        ok($memd->set($key11, $val11, $expires), "set Readonly utf8 key to Readonly utf8 value with Readonly expires");
+        is($memd->get($key11), $val11,           "get Readonly utf8 key is Readonly utf8 value");
+        is($memd->get_multi($key11)->{$key11}, $val11, "get_multi key 11");
+        sleep(4);
+        ok(! $memd->get($key11),                 "get Readonly utf8 key expired at correct time");
+    };
+    if ($@) {
+        fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests: $@");
+        fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests");
+        fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests");
+        fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests");
     }
   }
 
@@ -308,46 +305,38 @@ SKIP: {
         fail("Readonly utf8 key tests");
         fail("Readonly utf8 key tests");
     }
+    # Readonly utf8 value
+    eval q{
+        use Readonly;
 
-    TODO: {
-        # nesting a normal TODO under the skip didn't behave well.
-        # using todo_skip instead
-        # local $TODO = "utf8 values do not appear to work at this time";
-        todo_skip "utf8 values do not appear to work at this time", 7;
+        Readonly my $val10 => "10Третий.ключ";
+        ok($memd->set("key10", $val10), "set scalar key10 to Readonly utf8 value");
+        is($memd->get("key10"), $val10, "get scalar key10 is Readonly utf8 value");
+        is($memd->get_multi("key10")->{"key10"}, $val10, "get_multi key10");
+    };
+    if ($@) {
+        fail("Readonly utf8 value tests: $@");
+        fail("Readonly utf8 value tests");
+        fail("Readonly utf8 value tests");
+    }
+    # Readonly expires, utf8 key, and utf8 value
+    eval q{
+        use Readonly;
 
-        # Readonly utf8 value
-        eval q{
-            use Readonly;
-
-            Readonly my $val10 => "10Третий.ключ";
-            ok($memd->set("key10", $val10), "set scalar key10 to Readonly utf8 value");
-            is($memd->get("key10"), $val10, "get scalar key10 is Readonly utf8 value");
-            is($memd->get_multi("key10")->{"key10"}, $val10, "get_multi key10");
-        };
-        if ($@) {
-            fail("Readonly utf8 value tests: $@");
-            fail("Readonly utf8 value tests");
-            fail("Readonly utf8 value tests");
-        }
-        # Readonly expires, utf8 key, and utf8 value
-        eval q{
-            use Readonly;
-
-            Readonly my $expires => 3;
-            Readonly my $key11 => "11Третий.ключ";
-            Readonly my $val11 => "11Третий.ключ";
-            ok($memd->set($key11, $val11, $expires), "set Readonly utf8 key to Readonly utf8 value with Readonly expires");
-            is($memd->get($key11), $val11,           "get Readonly utf8 key is Readonly utf8 value");
-            is($memd->get_multi($key11)->{$key11}, $val11, "get_multi key 11");
-            sleep(4);
-            ok(! $memd->get($key11),                 "get Readonly utf8 key expired at correct time");
-        };
-        if ($@) {
-            fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests: $@");
-            fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests");
-            fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests");
-            fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests");
-        }
+        Readonly my $expires => 3;
+        Readonly my $key11 => "11Третий.ключ";
+        Readonly my $val11 => "11Третий.ключ";
+        ok($memd->set($key11, $val11, $expires), "set Readonly utf8 key to Readonly utf8 value with Readonly expires");
+        is($memd->get($key11), $val11,           "get Readonly utf8 key is Readonly utf8 value");
+        is($memd->get_multi($key11)->{$key11}, $val11, "get_multi key 11");
+        sleep(4);
+        ok(! $memd->get($key11),                 "get Readonly utf8 key expired at correct time");
+    };
+    if ($@) {
+        fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests: $@");
+        fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests");
+        fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests");
+        fail("combined Readonly expires, Readonly utf8 key, Readonly utf8 value tests");
     }
   }
 }

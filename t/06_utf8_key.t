@@ -37,6 +37,7 @@ use utf8;
 my $key1 = "Ïâ";
 my $key2 = "Ïâb";
 my $key3 = "Ïâc";
+no utf8;
 
 ok($memd->set($key1, "val1"), "set key1 as val1");
 

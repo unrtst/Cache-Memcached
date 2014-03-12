@@ -10,11 +10,16 @@
         areas where needed, using "bytes::length" when needed.
 
     * Added t/06_utf8_vals.t to test setting values with utf8 data.
-        Currently, these all fail, so they're under a TODO block.
+        These were broken. See also RT#28095
 
     * Added t/20_magic.t to test working with Tie'd and Readonly variables.
-        Tie'd and Readonly stuff works, as long as the value doesn't contain utf8 data.
-        More TODO's.
+        Tie'd and Readonly stuff works.
+
+    * Fix utf8 value bugs. Added internal memcached flag F_UTF8 = 4.
+        See also RT#28095. These were fixed differently than the patch on RT.
+        Rather than just twiddle the utf8 flag (which is insufficient in
+        some cases, ex with memcached 1.4.4), we encode to bytecode on set,
+        and decode to utf-8 on get.
 
 2014-02-23: version 1.34
 

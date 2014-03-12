@@ -37,6 +37,7 @@ use fields qw{
 # flag definitions
 use constant F_STORABLE => 1;
 use constant F_COMPRESS => 2;
+use constant F_UTF8     => 4;
 
 # size reduction required before saving compressed value
 use constant DEFAULT_COMPRESS_RATIO => 0.80; # percent
@@ -732,6 +733,10 @@ sub _set {
         local $Carp::CarpLevel = 3;
         $val = eval { &{ $self->{'serialize_methods'}[0] }( $val ) };
         $flags |= F_STORABLE;
+    } elsif (Encode::is_utf8($val)) {
+        # change to bytecode to avoid any confusion.
+        $val = Encode::encode('utf-8', $val);
+        $flags |= F_UTF8;
     }
     warn "value for memkey:$real_key is not defined" unless defined $val;
 
@@ -1043,6 +1048,10 @@ sub _load_multi {
                 if ($@) {
                     delete $ret->{$k};
                 }
+            }
+            if ($flags & F_UTF8) {
+                # decode from bytecode (which will also set utf8 flag)
+                $ret->{$k} = Encode::decode('utf-8', $ret->{$k});
             }
             # add cas value to result if we got it
             $ret->{$k} = [ $cas, $ret->{$k} ] if defined $cas;
