@@ -6,13 +6,33 @@ README
 TODO
 lib/Cache/Memcached.pm
 lib/Cache/Memcached/GetParser.pm
+script/benchmark_simple.pl
+script/benchmark_digest_keys_caching.pl
+script/benchmark_method_overrides.pl
 t/01_use.t
 t/02_keys.t
 t/03_stats.t
 t/04_noreply.t
 t/05_reconnect_timeout.t
 t/06_utf8_key.t
+t/06_utf8_val.t
+t/07_storable.t
+t/08_compression.t
+t/09_serialize_methods.t
 t/100_flush_bug.t
 t/101_multiple_clients.t
+t/10_compress_methods.t
+t/11_digest_keys_simple.t
+t/12_digest_keys_more.t
+t/12_digest_keys_threshold.t
+t/13_max_size.t
+t/14_compress_ratio.t
+t/15_namespace.t
+t/16_hash_namespace.t
+t/17_server_version.t
+t/18_cas.t
+t/19_touch.t
+t/20_magic.t
+t/test_structs.pl
 META.yml                                 Module YAML meta-data (added by MakeMaker)
 META.json                                Module JSON meta-data (added by MakeMaker)
