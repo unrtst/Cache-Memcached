@@ -14,7 +14,7 @@ my $testaddr = "127.0.0.1:11211";
 my $msock = IO::Socket::INET->new(PeerAddr => $testaddr,
                                   Timeout  => 3);
 if ($msock) {
-    plan tests => 35;
+    plan tests => 38;
 } else {
     plan skip_all => "No memcached instance running at $testaddr\n";
     exit 0;
@@ -68,6 +68,16 @@ ok(!is_utf8($memd->get("b")), "check flag of getted binary value");
 
 
 ########################
+# test from RT 92687
+my $rt92687_s = "\x81";
+my $rt92687_s_u = $rt92687_s;
+utf8::upgrade $rt92687_s_u;
+is($rt92687_s, $rt92687_s_u, "utf8::upgrade");
+ok($memd->set("rt92687", $rt92687_s_u), "set utf8::upgrade value");
+is($memd->get("rt92687"), $rt92687_s_u, "get utf8::upgrade value");
+
+
+########################
 # tests added in addition to RT 28095
 ok($memd->set("key1", $val1), "set key1 as val1");
 
@@ -115,3 +125,5 @@ is_deeply(
 # clean up after ourselves
 ok($memd->delete("key1"), "delete key1"); # already deleted
 ok($memd->delete("key2"), "delete key2");
+
+

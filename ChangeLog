@@ -20,6 +20,7 @@
         Rather than just twiddle the utf8 flag (which is insufficient in
         some cases, ex with memcached 1.4.4), we encode to bytecode on set,
         and decode to utf-8 on get.
+        Also fixes RT#92687.
 
     * Added thread support (not thoroughly tested).
         See also RE#54515
